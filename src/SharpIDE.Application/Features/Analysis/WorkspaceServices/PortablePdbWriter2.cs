@@ -63,7 +63,7 @@ namespace SharpIDE.Application.Features.Analysis.WorkspaceServices
 			return decompiler;
 		}
 
-		public static async Task<Dictionary<string, string>> WritePdb(
+		public static async Task<Dictionary<string, string>> DecompiledAndWritePdb(
 			PEFile file,
 			DecompilerTypeSystem decompilerTypeSystem,
 			DecompilerSettings settings,
@@ -75,6 +75,7 @@ namespace SharpIDE.Application.Features.Analysis.WorkspaceServices
 			int maxDegreeOfParallelism = -1,
 			CancellationToken cancellationToken = default)
 		{
+			using var _ = SharpIdeOtel.Source.StartActivity($"{nameof(PortablePdbWriter2)}.{nameof(DecompiledAndWritePdb)}");
 			MetadataBuilder metadata = new MetadataBuilder();
 			MetadataReader reader = file.Metadata;
 			var entrypointHandle = MetadataTokens.MethodDefinitionHandle(file.Reader.PEHeaders.CorHeader.EntryPointTokenOrRelativeVirtualAddress);

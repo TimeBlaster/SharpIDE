@@ -65,6 +65,15 @@ theme_override_font_sizes/font_size = 14
 text = "Restoring Solution"
 vertical_alignment = 1
 
+[node name="DecompilingAssemblyLabel" type="Label" parent="." unique_id=82697722]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_type_variation = &"Gray600Label"
+theme_override_font_sizes/font_size = 14
+text = "Decompiling Assembly"
+vertical_alignment = 1
+
 [node name="ProgressBar" type="ProgressBar" parent="." unique_id=1319533919]
 custom_minimum_size = Vector2(150, 9)
 layout_mode = 2
