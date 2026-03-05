@@ -7,6 +7,7 @@ using System.Reflection.Metadata.Ecma335;
 using System.Reflection.PortableExecutable;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading.Channels;
 using ICSharpCode.Decompiler;
 using ICSharpCode.Decompiler.CSharp;
 using ICSharpCode.Decompiler.CSharp.OutputVisitor;
@@ -62,7 +63,7 @@ namespace SharpIDE.Application.Features.Analysis.WorkspaceServices
 			return decompiler;
 		}
 
-		public static Dictionary<string, string> WritePdb(
+		public static async Task<Dictionary<string, string>> WritePdb(
 			PEFile file,
 			DecompilerTypeSystem decompilerTypeSystem,
 			DecompilerSettings settings,
@@ -106,7 +107,8 @@ namespace SharpIDE.Application.Features.Analysis.WorkspaceServices
 				Title = currentProgressTitle
 			};
 
-			var perFileResults = new ConcurrentBag<PerFileResult>();
+			var resultChannel = Channel.CreateUnbounded<PerFileResult>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
+			var processResultTask = Task.Run(() => ProcessChannelResults(resultChannel), cancellationToken);
 
 			Parallel.ForEach(
 				Partitioner.Create(sourceFiles, loadBalance: true),
@@ -142,54 +144,10 @@ namespace SharpIDE.Application.Features.Analysis.WorkspaceServices
 					var debugInfoGen = new DebugInfoGenerator(taskDecompiler.TypeSystem);
 					syntaxTree.AcceptVisitor(debugInfoGen);
 
-					perFileResults.Add(new PerFileResult(sourceFile.Key, sourceText, syntaxTree, sequencePoints, debugInfoGen));
+					if (resultChannel.Writer.TryWrite(new PerFileResult(sourceFile.Key, sourceText, syntaxTree, sequencePoints, debugInfoGen)) is false) throw new InvalidOperationException("Failed to write decompilation result to channel");
 				});
-
-			foreach (var result in perFileResults)
-			{
-				var sourceBlob = WriteSourceToBlob(metadata, result.SourceText, out var sourceCheckSum);
-				var name = metadata.GetOrAddDocumentName(result.Key);
-
-				var document = metadata.AddDocument(name,
-					hashAlgorithm: metadata.GetOrAddGuid(KnownGuids.HashAlgorithmSHA256),
-					hash: metadata.GetOrAddBlob(sourceCheckSum),
-					language: metadata.GetOrAddGuid(KnownGuids.CSharpLanguageGuid));
-
-				customDebugInfo.Add((document,
-					metadata.GetOrAddGuid(KnownGuids.EmbeddedSource),
-					sourceBlob));
-
-				result.DebugInfoGen.GenerateImportScopes(metadata, globalImportScope);
-				localScopes.AddRange(result.DebugInfoGen.LocalScopes);
-
-				collectedSourceFiles[result.Key] = result.SourceText;
-
-				foreach (var function in result.DebugInfoGen.Functions)
-				{
-					var method = function.MoveNextMethod ?? function.Method;
-					var methodHandle = (MethodDefinitionHandle)method.MetadataToken;
-					result.SequencePoints.TryGetValue(function, out var points);
-					ProcessMethod(methodHandle, document, points, result.SyntaxTree);
-					if (function.MoveNextMethod != null)
-					{
-						stateMachineMethods.Add((
-							(MethodDefinitionHandle)function.MoveNextMethod.MetadataToken,
-							(MethodDefinitionHandle)function.Method.MetadataToken
-						));
-						customDebugInfo.Add((
-							function.MoveNextMethod.MetadataToken,
-							metadata.GetOrAddGuid(KnownGuids.StateMachineHoistedLocalScopes),
-							metadata.GetOrAddBlob(BuildStateMachineHoistedLocalScopes(function))
-						));
-					}
-					if (function.IsAsync)
-					{
-						customMethodDebugInfo.Add((methodHandle,
-							metadata.GetOrAddGuid(KnownGuids.MethodSteppingInformation),
-							metadata.GetOrAddBlob(function.AsyncDebugInfo.BuildBlob(methodHandle))));
-					}
-				}
-			}
+			resultChannel.Writer.Complete();
+			await processResultTask;
 
 			foreach (var method in reader.MethodDefinitions)
 			{
@@ -261,6 +219,57 @@ namespace SharpIDE.Application.Features.Analysis.WorkspaceServices
 			blobBuilder.WriteContentTo(targetStream);
 
 			return collectedSourceFiles;
+
+			async Task ProcessChannelResults(Channel<PerFileResult> channel)
+			{
+				await foreach (var result in channel.Reader.ReadAllAsync(cancellationToken))
+				{
+					collectedSourceFiles[result.Key] = result.SourceText;
+
+					var sourceBlob = WriteSourceToBlob(metadata, result.SourceText, out var sourceCheckSum);
+					var name = metadata.GetOrAddDocumentName(result.Key);
+
+					var document = metadata.AddDocument(name,
+						hashAlgorithm: metadata.GetOrAddGuid(KnownGuids.HashAlgorithmSHA256),
+						hash: metadata.GetOrAddBlob(sourceCheckSum),
+						language: metadata.GetOrAddGuid(KnownGuids.CSharpLanguageGuid));
+
+					customDebugInfo.Add((document,
+						metadata.GetOrAddGuid(KnownGuids.EmbeddedSource),
+						sourceBlob));
+
+					result.DebugInfoGen.GenerateImportScopes(metadata, globalImportScope);
+					localScopes.AddRange(result.DebugInfoGen.LocalScopes);
+
+					collectedSourceFiles[result.Key] = result.SourceText;
+
+					foreach (var function in result.DebugInfoGen.Functions)
+					{
+						var method = function.MoveNextMethod ?? function.Method;
+						var methodHandle = (MethodDefinitionHandle)method.MetadataToken;
+						result.SequencePoints.TryGetValue(function, out var points);
+						ProcessMethod(methodHandle, document, points, result.SyntaxTree);
+						if (function.MoveNextMethod != null)
+						{
+							stateMachineMethods.Add((
+								(MethodDefinitionHandle)function.MoveNextMethod.MetadataToken,
+								(MethodDefinitionHandle)function.Method.MetadataToken
+							));
+							customDebugInfo.Add((
+								function.MoveNextMethod.MetadataToken,
+								metadata.GetOrAddGuid(KnownGuids.StateMachineHoistedLocalScopes),
+								metadata.GetOrAddBlob(BuildStateMachineHoistedLocalScopes(function))
+							));
+						}
+						if (function.IsAsync)
+						{
+							customMethodDebugInfo.Add((methodHandle,
+								metadata.GetOrAddGuid(KnownGuids.MethodSteppingInformation),
+								metadata.GetOrAddBlob(function.AsyncDebugInfo.BuildBlob(methodHandle))));
+						}
+					}
+				}
+			}
 
 			void ProcessMethod(MethodDefinitionHandle method, DocumentHandle document,
 				List<SequencePoint> sequencePoints, SyntaxTree syntaxTree)

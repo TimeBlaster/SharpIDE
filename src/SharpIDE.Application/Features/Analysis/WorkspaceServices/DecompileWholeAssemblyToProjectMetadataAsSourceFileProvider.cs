@@ -259,7 +259,7 @@ internal sealed class DecompileWholeAssemblyToProjectMetadataAsSourceFileProvide
 		UniqueAssemblyKey assemblyKey,
 		CancellationToken cancellationToken)
 	{
-		return Task.Run(Dictionary<string, string>? () =>
+		return Task.Run(async () =>
 		{
 			var logger = new StringBuilder();
 			var resolver = new AssemblyResolver2(compilation, logger);
@@ -284,8 +284,8 @@ internal sealed class DecompileWholeAssemblyToProjectMetadataAsSourceFileProvide
 				var pdbPath = Path.Combine(pdbDir, $"{assemblyName}.decompiled.pdb");
 				Directory.CreateDirectory(pdbDir);
 
-				using var pdbStream = new FileStream(pdbPath, FileMode.Create, FileAccess.Write, FileShare.None);
-				var sourceFiles = PortablePdbWriter2.WritePdb(file, ts, settings, pdbStream, noLogo: true);
+				await using var pdbStream = new FileStream(pdbPath, FileMode.Create, FileAccess.Write, FileShare.None);
+				var sourceFiles = await PortablePdbWriter2.WritePdb(file, ts, settings, pdbStream, noLogo: true, cancellationToken: cancellationToken);
 
 				return sourceFiles.Count > 0 ? sourceFiles : null;
 			}
