@@ -9,6 +9,8 @@ public partial class InvertedVSplitContainer : VSplitContainer
     private int _invertedOffset = 200;
     private bool _invertedCollapsed = false;
 
+    private int _separationWhenUncollapsed;
+
     public void InvertedSetCollapsed(bool collapsed)
     {
         if (_invertedCollapsed == collapsed) return;
@@ -17,16 +19,19 @@ public partial class InvertedVSplitContainer : VSplitContainer
         {
             SplitOffset = (int)Size.Y + 100;
             DraggingEnabled = false;
+            AddThemeConstantOverride(ThemeStringNames.Separation, 0);
         }
         else
         {
             SplitOffset = (int)Size.Y - _invertedOffset;
             DraggingEnabled = true;
+            AddThemeConstantOverride(ThemeStringNames.Separation, _separationWhenUncollapsed);
         }
     }
 
     public override void _Ready()
     {
+        _separationWhenUncollapsed = GetThemeConstant(ThemeStringNames.Separation);
         Dragged += OnDragged;
     }
 
