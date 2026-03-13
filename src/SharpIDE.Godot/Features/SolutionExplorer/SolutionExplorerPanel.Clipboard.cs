@@ -16,14 +16,7 @@ public partial class SolutionExplorerPanel
         _itemsOnClipboard = (selectedItems
             .Select(item =>
             {
-                var metadata = item.GetMetadata(0).As<RefCounted?>();
-                IFileOrFolder? result = metadata switch
-                {
-                    RefCountedContainer<SharpIdeFile> file => file.Item,
-                    RefCountedContainer<SharpIdeFolder> folder => folder.Item,
-                    _ => null
-                };
-                return result;
+                return item.GetTypedMetadata<IFileOrFolder>(0);
             })
             .OfType<IFileOrFolder>()
             .ToList(),
@@ -65,13 +58,8 @@ public partial class SolutionExplorerPanel
     {
         var selected = _tree.GetSelected();
         if (selected is null || _itemsOnClipboard is null) return;
-        var genericMetadata = selected.GetMetadata(0).As<RefCounted?>();
-        IFolderOrProject? destinationFolderOrProject = genericMetadata switch
-        {
-            RefCountedContainer<SharpIdeFolder> f => f.Item,
-            RefCountedContainer<SharpIdeProjectModel> p => p.Item,
-            _ => null
-        };
+        IFolderOrProject? destinationFolderOrProject = selected.GetTypedMetadata<SharpIdeFolder>(0)
+            ?? (IFolderOrProject?)selected.GetTypedMetadata<SharpIdeProjectModel>(0);
         if (destinationFolderOrProject is null) return;
 			
         var (filesToPaste, operation) = _itemsOnClipboard.Value;
