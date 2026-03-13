@@ -51,14 +51,24 @@ public sealed class GitRepositoryMonitor : IDisposable
     {
         var fullPath = NormalizePath(args.FullPath);
         var headPath = Path.Combine(_gitDirectoryPath, "HEAD");
+        var fetchHeadPath = Path.Combine(_gitDirectoryPath, "FETCH_HEAD");
         var indexPath = Path.Combine(_gitDirectoryPath, "index");
+        var packedRefsPath = Path.Combine(_gitDirectoryPath, "packed-refs");
         var logHeadPath = Path.Combine(_gitDirectoryPath, "logs", "HEAD");
         var refsHeadsPath = Path.Combine(_gitDirectoryPath, "refs", "heads");
+        var refsRemotesPath = Path.Combine(_gitDirectoryPath, "refs", "remotes");
+        var refsTagsPath = Path.Combine(_gitDirectoryPath, "refs", "tags");
+        var logRefsRemotesPath = Path.Combine(_gitDirectoryPath, "logs", "refs", "remotes");
 
         if (fullPath.Equals(NormalizePath(headPath), StringComparison.OrdinalIgnoreCase)
+            || fullPath.Equals(NormalizePath(fetchHeadPath), StringComparison.OrdinalIgnoreCase)
             || fullPath.Equals(NormalizePath(indexPath), StringComparison.OrdinalIgnoreCase)
+            || fullPath.Equals(NormalizePath(packedRefsPath), StringComparison.OrdinalIgnoreCase)
             || fullPath.Equals(NormalizePath(logHeadPath), StringComparison.OrdinalIgnoreCase)
-            || fullPath.StartsWith(NormalizePath(refsHeadsPath) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            || fullPath.StartsWith(NormalizePath(refsHeadsPath) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            || fullPath.StartsWith(NormalizePath(refsRemotesPath) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            || fullPath.StartsWith(NormalizePath(refsTagsPath) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            || fullPath.StartsWith(NormalizePath(logRefsRemotesPath) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
         {
             RepositoryChanged.InvokeParallelFireAndForget();
         }

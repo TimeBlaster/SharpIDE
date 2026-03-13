@@ -1,6 +1,7 @@
 using CliWrap;
 using CliWrap.Buffered;
 using LibGit2Sharp;
+using SharpIDE.Application;
 using SharpIDE.Application.Features.FilePersistence;
 
 namespace SharpIDE.Application.Features.Git;
@@ -9,6 +10,7 @@ public class GitService(IdeOpenTabsFileManager openTabsFileManager)
 {
     private const string GitEmptyTreeSha = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
     private readonly GitSelectivePatchBuilder _patchBuilder = new();
+    private readonly IdeOpenTabsFileManager _openTabsFileManager = openTabsFileManager;
 
     public Task<GitSnapshot> GetSnapshot(string solutionFilePathOrDirectory, int commitCount = 50, CancellationToken cancellationToken = default)
     {
@@ -1672,7 +1674,7 @@ public class GitService(IdeOpenTabsFileManager openTabsFileManager)
 
     private async Task<string> ReadWorkingTextAsync(string absolutePath, CancellationToken cancellationToken)
     {
-        var openText = await openTabsFileManager.GetFileTextIfOpenAsync(absolutePath);
+        var openText = await _openTabsFileManager.GetFileTextIfOpenAsync(absolutePath);
         if (openText is not null)
         {
             return NormalizeNewLines(openText);
@@ -1776,6 +1778,7 @@ public class GitService(IdeOpenTabsFileManager openTabsFileManager)
     {
         var absolutePath = NormalizePath(Path.Combine(repo.Info.WorkingDirectory, entry.FilePath));
         var existsInHead = ExistsInHead(repo.Head.Tip, entry.FilePath);
+        var isTracked = existsInHead || repo.Index[entry.FilePath] is not null;
         var status = GitWorkingTreeStatus.None;
 
         if (entry.State.HasFlag(FileStatus.ModifiedInIndex) || entry.State.HasFlag(FileStatus.ModifiedInWorkdir))
@@ -1803,7 +1806,7 @@ public class GitService(IdeOpenTabsFileManager openTabsFileManager)
             status |= GitWorkingTreeStatus.Conflicted;
         }
 
-        if (!existsInHead)
+        if (!isTracked)
         {
             status |= GitWorkingTreeStatus.Unversioned;
         }
@@ -1815,11 +1818,11 @@ public class GitService(IdeOpenTabsFileManager openTabsFileManager)
         {
             AbsolutePath = absolutePath,
             RepoRelativePath = NormalizeRepositoryRelativePath(entry.FilePath),
-            Group = existsInHead ? GitWorkingTreeGroup.ChangedFiles : GitWorkingTreeGroup.UnversionedFiles,
+            Group = isTracked ? GitWorkingTreeGroup.ChangedFiles : GitWorkingTreeGroup.UnversionedFiles,
             Status = status,
             StageDisplayState = MapStageDisplayState(hasIndexChanges, hasWorktreeChanges),
             IsStaged = hasIndexChanges,
-            IsTracked = existsInHead
+            IsTracked = isTracked
         };
     }
 

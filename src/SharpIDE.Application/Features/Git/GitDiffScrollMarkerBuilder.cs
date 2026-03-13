@@ -45,6 +45,7 @@ public static class GitDiffScrollMarkerBuilder
         for (var index = 0; index < orderedRows.Length; index++)
         {
             var row = orderedRows[index];
+            var sideLineNumber = useLeftSide ? row.LeftFileLineNumber : row.RightFileLineNumber;
             var kind = GetMarkerKind(row.Kind, useLeftSide);
             if (!kind.HasValue)
             {

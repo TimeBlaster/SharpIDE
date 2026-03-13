@@ -760,19 +760,27 @@ public partial class GitPanel : Control
         var selected = _historyTree.GetSelected();
         var row = selected?.GetTypedMetadata<GitHistoryRow>(0);
         if (row is null) return;
-        _selectedCommitSha = row.Sha;
-        ActiveTab.SelectedCommitSha = row.Sha;
+        var requestedCommitSha = row.Sha;
+        var requestedRepoRootPath = _repoRootPath;
+        _selectedCommitSha = requestedCommitSha;
+        ActiveTab.SelectedCommitSha = requestedCommitSha;
 
         _ = Task.GodotRun(async () =>
         {
-            var detailsTask = _gitService.GetCommitDetails(_repoRootPath, row.Sha);
-            var filesTask = _gitService.GetCommitChangedFiles(_repoRootPath, row.Sha);
+            var detailsTask = _gitService.GetCommitDetails(requestedRepoRootPath, requestedCommitSha);
+            var filesTask = _gitService.GetCommitChangedFiles(requestedRepoRootPath, requestedCommitSha);
             await Task.WhenAll(detailsTask, filesTask);
             var details = await detailsTask;
             var files = await filesTask;
             await this.InvokeAsync(() =>
             {
-                PopulateFilesTree(row.Sha, files);
+                if (!string.Equals(_repoRootPath, requestedRepoRootPath, StringComparison.Ordinal)
+                    || !string.Equals(_selectedCommitSha, requestedCommitSha, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                PopulateFilesTree(requestedCommitSha, files);
                 PopulateDetails(details);
             });
         });

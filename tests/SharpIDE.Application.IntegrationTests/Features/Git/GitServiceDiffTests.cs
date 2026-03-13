@@ -131,6 +131,33 @@ public class GitServiceDiffTests
     }
 
     [Fact]
+    public async Task GetFileContentView_NewlyAddedFileWithStagedAndUnstagedChanges_PreservesTrackedStageActions()
+    {
+        using var repo = await TempGitRepo.CreateAsync();
+        var filePath = repo.WriteFile("new-file.txt", """
+            alpha
+            bravo
+            """);
+        repo.Git("add new-file.txt");
+        repo.WriteFile("new-file.txt", """
+            alpha
+            bravo
+            charlie
+            """);
+
+        var view = await _gitService.GetFileContentView(filePath, TestContext.Current.CancellationToken);
+
+        view.DiffView.Should().NotBeNull();
+        view.DiffView!.Mode.Should().Be(GitDiffMode.Historical);
+        view.UnstagedActions!.LineActions.Should().NotBeEmpty();
+        view.StagedActions!.LineActions.Should().NotBeEmpty();
+        view.RowStatesByRowId.Values.Should().Contain(state => state.StageState == GitDiffRowStageState.Staged);
+        view.RowStatesByRowId.Values.Should().Contain(state =>
+            state.StageState == GitDiffRowStageState.Unstaged ||
+            state.StageState == GitDiffRowStageState.Mixed);
+    }
+
+    [Fact]
     public async Task GetFileContentView_StageUnstageDoesNotChangeCanonicalDisplayText()
     {
         using var repo = await TempGitRepo.CreateAsync();
