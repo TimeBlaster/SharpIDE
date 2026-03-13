@@ -88,16 +88,19 @@ public partial class CodeEditorPanel : MarginContainer
 		if (_tabContainer is null || Solution is null || Singletons.AppState is null) return;
 
 		var selectedTabIndex = _tabContainer.CurrentTab;
+		var selectedTab = selectedTabIndex >= 0 && selectedTabIndex < _tabContainer.GetChildCount()
+			? _tabContainer.GetChild(selectedTabIndex)
+			: null;
 		var thisSolution = Singletons.AppState.RecentSlns.SingleOrDefault(s => s.FilePath == Solution.FilePath);
 		if (thisSolution is null) return;
-		thisSolution.IdeSolutionState.OpenTabs = _tabContainer.GetChildren().OfType<SharpIdeCodeEditContainer>()
-			.Select(s => s.CodeEdit)
-			.Select((t, index) => new OpenTab
+		thisSolution.IdeSolutionState.OpenTabs = _tabContainer.GetChildren()
+			.OfType<SharpIdeCodeEditContainer>()
+			.Select(container => new OpenTab
 			{
-				FilePath = t.SharpIdeFile.Path,
-				CaretLine = t.GetCaretLine(),
-				CaretColumn = t.GetCaretColumn(),
-				IsSelected = index == selectedTabIndex
+				FilePath = container.CodeEdit.SharpIdeFile.Path,
+				CaretLine = container.CodeEdit.GetCaretLine(),
+				CaretColumn = container.CodeEdit.GetCaretColumn(),
+				IsSelected = ReferenceEquals(container, selectedTab)
 			})
 			.ToList();
 	}
