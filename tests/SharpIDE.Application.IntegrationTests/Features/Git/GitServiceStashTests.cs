@@ -35,6 +35,33 @@ public class GitServiceStashTests
     }
 
     [Fact]
+    public async Task StagePaths_CaseDistinctFiles_StagesEachPath()
+    {
+        if (!SupportsCaseDistinctPaths())
+        {
+            return;
+        }
+
+        using var repo = await TempGitRepo.CreateAsync();
+        var upperPath = repo.WriteFile("Case.txt", "upper");
+        var lowerPath = repo.WriteFile("case.txt", "lower");
+        repo.Git("add Case.txt case.txt");
+        repo.Commit("initial");
+
+        repo.WriteFile("Case.txt", "upper modified");
+        repo.WriteFile("case.txt", "lower modified");
+
+        await _gitService.StagePaths(repo.RootPath, [upperPath, lowerPath], TestContext.Current.CancellationToken);
+
+        var stagedPaths = repo.Git("diff --cached --name-only --")
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        stagedPaths.Should().HaveCount(2);
+        stagedPaths.Should().Contain("Case.txt");
+        stagedPaths.Should().Contain("case.txt");
+    }
+
+    [Fact]
     public async Task GetSnapshot_LoadsTrackedAndUntrackedStashFiles()
     {
         using var repo = await TempGitRepo.CreateAsync();
@@ -279,5 +306,28 @@ public class GitServiceStashTests
             StatusCode = file.StatusCode,
             ContentKind = file.ContentKind
         };
+    }
+
+    private static bool SupportsCaseDistinctPaths()
+    {
+        var rootPath = Path.Combine(Path.GetTempPath(), $"sharpide-case-check-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(rootPath);
+
+        try
+        {
+            File.WriteAllText(Path.Combine(rootPath, "Case.txt"), "upper");
+            File.WriteAllText(Path.Combine(rootPath, "case.txt"), "lower");
+            return Directory.GetFiles(rootPath).Length == 2;
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(rootPath, recursive: true);
+            }
+            catch
+            {
+            }
+        }
     }
 }

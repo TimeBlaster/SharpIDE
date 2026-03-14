@@ -11,8 +11,8 @@ public class SharpIdeFolder : ISharpIdeNode, IExpandableSharpIdeNode, IChildShar
 	public required string Path { get; set; }
 	public string ChildNodeBasePath => Path;
 	public required string Name { get; set; }
-	public ObservableList<SharpIdeFile> Files { get; init; }
-	public ObservableList<SharpIdeFolder> Folders { get; init; }
+	public ObservableList<SharpIdeFile> Files { get; init; } = [];
+	public ObservableList<SharpIdeFolder> Folders { get; init; } = [];
 	public bool Expanded { get; set; }
 
 	[SetsRequiredMembers]

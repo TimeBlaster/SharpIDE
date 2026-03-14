@@ -655,7 +655,12 @@ public partial class RoslynAnalysis(ILogger<RoslynAnalysis> logger, BuildService
 		await _solutionLoadedTcs.Task;
 		var document = await GetDocumentForSharpIdeFile(file, cancellationToken);
 		var completionService = CompletionService.GetService(document);
-		var description = await completionService!.GetDescriptionAsync(document, completionItem, cancellationToken);
+		var description = await completionService!.GetDescriptionAsync(
+			document,
+			completionItem,
+			CompletionOptions.Default,
+			Microsoft.CodeAnalysis.LanguageService.SymbolDescriptionOptions.Default,
+			cancellationToken);
 		return description!;
 	}
 
@@ -818,7 +823,14 @@ public partial class RoslynAnalysis(ILogger<RoslynAnalysis> logger, BuildService
 
 		var sourceText = await document.GetTextAsync(cancellationToken);
 		var position = sourceText.Lines.GetPosition(linePosition);
-		var completions = await completionService.GetCompletionsAsync(document, position, completionTrigger, cancellationToken: cancellationToken);
+		var completions = await completionService.GetCompletionsAsync(
+			document,
+			position,
+			CompletionOptions.Default,
+			document.Project.Solution.Options ?? OptionSet.Empty,
+			completionTrigger,
+			roles: null,
+			cancellationToken);
 		var triggerLinePosition = sourceText.GetLinePosition(completions.Span.Start);
 		return (completions, triggerLinePosition);
 	}
@@ -920,7 +932,10 @@ public partial class RoslynAnalysis(ILogger<RoslynAnalysis> logger, BuildService
 		using var _ = SharpIdeOtel.Source.StartActivity($"{nameof(RoslynAnalysis)}.{nameof(GetCodeActionApplyChanges)}");
 		await _solutionLoadedTcs.Task;
 		// TODO: Handle codeAction.NestedActions
-		var operations = await codeAction.GetOperationsAsync(cancellationToken);
+		var operations = await codeAction.GetOperationsAsync(
+			_workspace!.CurrentSolution,
+			new Progress<CodeAnalysisProgress>(_ => { }),
+			cancellationToken);
 		var originalSolution = _workspace!.CurrentSolution;
 		var updatedSolution = originalSolution;
 		foreach (var operation in operations)

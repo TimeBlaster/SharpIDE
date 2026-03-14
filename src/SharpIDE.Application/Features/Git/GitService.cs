@@ -3,6 +3,7 @@ using CliWrap.Buffered;
 using LibGit2Sharp;
 using SharpIDE.Application;
 using SharpIDE.Application.Features.FilePersistence;
+using System.Diagnostics;
 
 namespace SharpIDE.Application.Features.Git;
 
@@ -11,6 +12,7 @@ public class GitService(IdeOpenTabsFileManager openTabsFileManager)
     private const string GitEmptyTreeSha = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
     private readonly GitSelectivePatchBuilder _patchBuilder = new();
     private readonly IdeOpenTabsFileManager _openTabsFileManager = openTabsFileManager;
+    private readonly record struct GitCommandResult(int ExitCode, string StandardOutput, string StandardError);
 
     public Task<GitSnapshot> GetSnapshot(string solutionFilePathOrDirectory, int commitCount = 50, CancellationToken cancellationToken = default)
     {
@@ -1323,12 +1325,7 @@ public class GitService(IdeOpenTabsFileManager openTabsFileManager)
 
     private static IReadOnlyList<GitStashEntry> LoadStashes(string repoRoot)
     {
-        var listResult = ExecuteGitBufferedAsync(
-                repoRoot,
-                ["stash", "list", "--format=%gd%x1f%s%x1e"],
-                CancellationToken.None)
-            .GetAwaiter()
-            .GetResult();
+        var listResult = ExecuteGitBuffered(repoRoot, ["stash", "list", "--format=%gd%x1f%s%x1e"]);
         EnsureSuccess(listResult, "Failed to load stashes.");
 
         var stashes = new List<GitStashEntry>();
@@ -1359,12 +1356,7 @@ public class GitService(IdeOpenTabsFileManager openTabsFileManager)
 
     private static IReadOnlyList<GitStashChangedFile> LoadStashWorkingTreeFiles(string repoRoot, string stashRef)
     {
-        var result = ExecuteGitBufferedAsync(
-                repoRoot,
-                ["diff-tree", "--no-commit-id", "--name-status", "-r", "-M", $"{stashRef}^1", stashRef],
-                CancellationToken.None)
-            .GetAwaiter()
-            .GetResult();
+        var result = ExecuteGitBuffered(repoRoot, ["diff-tree", "--no-commit-id", "--name-status", "-r", "-M", $"{stashRef}^1", stashRef]);
         EnsureSuccess(result, "Failed to load stash files.");
 
         return ParseNameStatusEntries(result.StandardOutput)
@@ -1381,12 +1373,7 @@ public class GitService(IdeOpenTabsFileManager openTabsFileManager)
 
     private static IReadOnlyList<GitStashChangedFile> LoadStashUntrackedFiles(string repoRoot, string stashRef)
     {
-        var result = ExecuteGitBufferedAsync(
-                repoRoot,
-                ["diff-tree", "--root", "--no-commit-id", "--name-status", "-r", $"{stashRef}^3"],
-                CancellationToken.None)
-            .GetAwaiter()
-            .GetResult();
+        var result = ExecuteGitBuffered(repoRoot, ["diff-tree", "--root", "--no-commit-id", "--name-status", "-r", $"{stashRef}^3"]);
         EnsureSuccess(result, "Failed to load stashed untracked files.");
 
         return ParseNameStatusEntries(result.StandardOutput)
@@ -1403,12 +1390,7 @@ public class GitService(IdeOpenTabsFileManager openTabsFileManager)
 
     private static bool RevisionExists(string repoRoot, string revision)
     {
-        var result = ExecuteGitBufferedAsync(
-                repoRoot,
-                ["rev-parse", "--verify", "--quiet", revision],
-                CancellationToken.None)
-            .GetAwaiter()
-            .GetResult();
+        var result = ExecuteGitBuffered(repoRoot, ["rev-parse", "--verify", "--quiet", revision]);
         return result.ExitCode is 0;
     }
 
@@ -1902,7 +1884,7 @@ public class GitService(IdeOpenTabsFileManager openTabsFileManager)
 
     private static IEnumerable<string> ToRepositoryRelativePaths(Repository repo, IEnumerable<string> paths)
     {
-        foreach (var path in paths.Select(NormalizePath).Distinct(StringComparer.OrdinalIgnoreCase))
+        foreach (var path in paths.Select(NormalizePath).Distinct(StringComparer.Ordinal))
         {
             var relativePath = Path.GetRelativePath(repo.Info.WorkingDirectory, path);
             yield return NormalizeRepositoryRelativePath(relativePath);
@@ -1994,7 +1976,48 @@ public class GitService(IdeOpenTabsFileManager openTabsFileManager)
         return await command.ExecuteBufferedAsync(cancellationToken);
     }
 
+    private static GitCommandResult ExecuteGitBuffered(string repoRoot, IEnumerable<string> args, string? stdinText = null)
+    {
+        var startInfo = new ProcessStartInfo("git")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            RedirectStandardInput = stdinText is not null,
+            UseShellExecute = false
+        };
+
+        startInfo.ArgumentList.Add("-C");
+        startInfo.ArgumentList.Add(repoRoot);
+        foreach (var arg in args)
+        {
+            startInfo.ArgumentList.Add(arg);
+        }
+
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start git process.");
+        if (stdinText is not null)
+        {
+            process.StandardInput.Write(stdinText);
+            process.StandardInput.Close();
+        }
+
+        var standardOutput = process.StandardOutput.ReadToEnd();
+        var standardError = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+
+        return new GitCommandResult(process.ExitCode, standardOutput, standardError);
+    }
+
     private static string NormalizeNewLines(string text) => text.Replace("\r\n", "\n");
+
+    private static void EnsureSuccess(GitCommandResult result, string fallbackMessage)
+    {
+        if (result.ExitCode is 0) return;
+
+        var error = string.IsNullOrWhiteSpace(result.StandardError)
+            ? result.StandardOutput.Trim()
+            : result.StandardError.Trim();
+        throw new InvalidOperationException(string.IsNullOrWhiteSpace(error) ? fallbackMessage : error);
+    }
 
     private static void EnsureSuccess(BufferedCommandResult result, string fallbackMessage)
     {

@@ -397,9 +397,13 @@ public partial class GitPanel : Control
     {
         if (DateTimeOffset.UtcNow < _suppressRepositoryRefreshUntil) return;
 
-        _refreshDebounceCts?.Cancel();
-        _refreshDebounceCts?.Dispose();
+        var previousRefreshDebounceCts = _refreshDebounceCts;
         _refreshDebounceCts = new CancellationTokenSource();
+        if (previousRefreshDebounceCts is not null)
+        {
+            await previousRefreshDebounceCts.CancelAsync();
+            previousRefreshDebounceCts.Dispose();
+        }
         try
         {
             await Task.Delay(300, _refreshDebounceCts.Token);

@@ -195,9 +195,13 @@ public partial class CommitPanel : MarginContainer
     {
         if (DateTimeOffset.UtcNow < _suppressRepositoryRefreshUntil) return;
 
-        _refreshDebounceCts?.Cancel();
-        _refreshDebounceCts?.Dispose();
+        var previousRefreshDebounceCts = _refreshDebounceCts;
         _refreshDebounceCts = new CancellationTokenSource();
+        if (previousRefreshDebounceCts is not null)
+        {
+            await previousRefreshDebounceCts.CancelAsync();
+            previousRefreshDebounceCts.Dispose();
+        }
         try
         {
             await Task.Delay(TimeSpan.FromMilliseconds(300), _refreshDebounceCts.Token);
@@ -428,7 +432,7 @@ public partial class CommitPanel : MarginContainer
         if (_snapshot.Repository.IsRepositoryDiscovered is false || _isBusy) return;
 
         var pathList = paths
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Distinct(StringComparer.Ordinal)
             .ToList();
         if (pathList.Count is 0) return;
 
@@ -457,6 +461,7 @@ public partial class CommitPanel : MarginContainer
         catch (Exception ex)
         {
             await ShowErrorDialogAsync("Git Action Failed", ex.Message);
+            _isBusy = false;
             await RefreshSnapshotAsync();
         }
         finally

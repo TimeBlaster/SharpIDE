@@ -208,9 +208,13 @@ public partial class GitDiffViewer : MarginContainer
         if (string.IsNullOrWhiteSpace(SourcePath)) return;
         if (DateTimeOffset.UtcNow < _suppressRepositoryRefreshUntil) return;
 
-        _repoRefreshDebounceCts?.Cancel();
-        _repoRefreshDebounceCts?.Dispose();
+        var previousRepoRefreshDebounceCts = _repoRefreshDebounceCts;
         _repoRefreshDebounceCts = new CancellationTokenSource();
+        if (previousRepoRefreshDebounceCts is not null)
+        {
+            await previousRepoRefreshDebounceCts.CancelAsync();
+            previousRepoRefreshDebounceCts.Dispose();
+        }
         try
         {
             await Task.Delay(250, _repoRefreshDebounceCts.Token);
