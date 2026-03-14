@@ -64,7 +64,7 @@ public partial class ProblemsPanel : Control
             var treeItem = tree.CreateItem(parent);
             treeItem.SetText(0, e.NewItem.Value.Name);
             treeItem.SetIcon(0, CsprojIcon);
-            treeItem.SetMetadata(0, new RefCountedContainer<SharpIdeProjectModel>(e.NewItem.Value));
+            treeItem.SetMetadata(0, new RefCountedContainer(e.NewItem.Value));
             e.NewItem.View.Value = treeItem;
             
             Observable.EveryValueChanged(e.NewItem.Value, s => s.Diagnostics.Count).SubscribeOnThreadPool().ObserveOnThreadPool()
@@ -88,10 +88,7 @@ public partial class ProblemsPanel : Control
         var hovered = _tree.GetItemAtPosition(_tree.GetLocalMousePosition()) == treeItem;
         var isSelected = treeItem.IsSelected(0);
         
-        var diagnosticContainer = treeItem.GetMetadata(0).As<RefCountedContainer<SharpIdeDiagnostic>?>();
-        if (diagnosticContainer is null) return;
-        
-        var diagnostic = diagnosticContainer.Item;
+        if (!treeItem.TryGetTypedMetadata<SharpIdeDiagnostic>(0, out var diagnostic)) return;
         var message = diagnostic.Diagnostic.GetMessage();
         var severity = diagnostic.Diagnostic.Severity;
         var linePosition = diagnostic.Span.Start;
@@ -173,7 +170,7 @@ public partial class ProblemsPanel : Control
             diagItem.SetCellMode(0, TreeItem.TreeCellMode.Custom);
             diagItem.SetCustomAsButton(0, true);
             diagItem.SetTooltipText(0, e.NewItem.Value.Diagnostic.GetMessage());
-            diagItem.SetMetadata(0, new RefCountedContainer<SharpIdeDiagnostic>(e.NewItem.Value));
+            diagItem.SetMetadata(0, new RefCountedContainer(e.NewItem.Value));
             // Avoid allocation via Callable.From((TreeItem s, Rect2 x) => CustomDraw(s, x))
             diagItem.SetCustomDrawCallback(0, _diagnosticCustomDrawCallable!.Value);
             e.NewItem.View.Value = diagItem;
@@ -192,12 +189,9 @@ public partial class ProblemsPanel : Control
     private void TreeOnItemActivated()
     {
         var selected = _tree.GetSelected();
-        var diagnosticContainer = selected.GetMetadata(0).As<RefCountedContainer<SharpIdeDiagnostic>?>();
-        if (diagnosticContainer is null) return;
-        var diagnostic = diagnosticContainer.Item;
+        if (!selected.TryGetTypedMetadata<SharpIdeDiagnostic>(0, out var diagnostic)) return;
         var parentTreeItem = selected.GetParent();
-        var projectContainer = parentTreeItem.GetMetadata(0).As<RefCountedContainer<SharpIdeProjectModel>?>();
-        if (projectContainer is null) return;
+        if (parentTreeItem.GetTypedMetadata<SharpIdeProjectModel>(0) is null) return;
         OpenDocumentContainingDiagnostic(diagnostic);
     }
     

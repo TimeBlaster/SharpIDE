@@ -124,18 +124,43 @@ public static class NodeExtensions
         }
     }
 
+    extension(Variant variant)
+    {
+        public T? GetMetadataItem<T>()
+        {
+            return variant.TryGetMetadataItem<T>(out var item) ? item : default;
+        }
+
+        public bool TryGetMetadataItem<T>(out T item)
+        {
+            var refCountedMetadata = variant.As<RefCounted?>();
+            switch (refCountedMetadata)
+            {
+                case RefCountedContainer { Item: T containedItem }:
+                    item = containedItem;
+                    return true;
+                case T directItem:
+                    item = directItem;
+                    return true;
+                default:
+                    item = default!;
+                    return false;
+            }
+        }
+    }
+
     extension(TreeItem treeItem)
     {
-        public T? GetTypedMetadata<T>(int column) where T : RefCounted?
+        public T? GetTypedMetadata<T>(int column)
         {
-            var metadata = treeItem.GetMetadata(column);
-            var refCountedMetadata = metadata.As<RefCounted?>();
-            if (refCountedMetadata is T correctTypeContainer)
-            {
-                return correctTypeContainer;
-            }
-            return null;
+            return treeItem.GetMetadata(column).GetMetadataItem<T>();
         }
+
+        public bool TryGetTypedMetadata<T>(int column, out T item)
+        {
+            return treeItem.GetMetadata(column).TryGetMetadataItem(out item);
+        }
+
         public void MoveToIndexInParent(int currentIndex, int newIndex)
         {
             var parent = treeItem.GetParent()!;

@@ -48,6 +48,13 @@ public partial class SolutionExplorerPanel : MarginContainer
 		// Remove the tree from the scene tree for now, we will add it back when we bind to a solution
 		_panelContainer.RemoveChild(_tree);
 		GodotGlobalEvents.Instance.FileExternallySelected.Subscribe(OnFileExternallySelected);
+		GodotGlobalEvents.Instance.GitStatusesChanged.Subscribe(OnGitStatusesChanged);
+	}
+
+	public override void _ExitTree()
+	{
+		GodotGlobalEvents.Instance.FileExternallySelected.Unsubscribe(OnFileExternallySelected);
+		GodotGlobalEvents.Instance.GitStatusesChanged.Unsubscribe(OnGitStatusesChanged);
 	}
 
 	public override void _UnhandledKeyInput(InputEvent @event)
@@ -85,17 +92,23 @@ public partial class SolutionExplorerPanel : MarginContainer
 		
 		var mouseButtonMask = (MouseButtonMask)mouseButtonIndex;
 
-		var genericMetadata = selected.GetMetadata(0).As<RefCounted?>();
-		switch (mouseButtonMask, genericMetadata)
+		if (selected.GetTypedMetadata<SharpIdeFile>(0) is { } file)
 		{
-			case (MouseButtonMask.Left, RefCountedContainer<SharpIdeFile> fileContainer): GodotGlobalEvents.Instance.FileSelected.InvokeParallelFireAndForget(fileContainer.Item, null); break;
-			case (MouseButtonMask.Right, RefCountedContainer<SharpIdeFile> fileContainer): OpenContextMenuFile(fileContainer.Item); break;
-			case (MouseButtonMask.Left, RefCountedContainer<SharpIdeProjectModel> { Item.IsInvalid: true }): GodotGlobalEvents.Instance.BottomPanelTabExternallySelected.InvokeParallelFireAndForget(BottomPanelType.Problems); break;
-			case (MouseButtonMask.Right, RefCountedContainer<SharpIdeProjectModel> projectContainer): OpenContextMenuProject(projectContainer.Item); break;
-			case (MouseButtonMask.Left, RefCountedContainer<SharpIdeFolder>): break;
-			case (MouseButtonMask.Right, RefCountedContainer<SharpIdeFolder> folderContainer): OpenContextMenuFolder(folderContainer.Item, selected); break;
-			case (MouseButtonMask.Left, RefCountedContainer<SharpIdeSolutionFolder>): break;
-			default: break;
+			if (mouseButtonMask is MouseButtonMask.Left) GodotGlobalEvents.Instance.FileSelected.InvokeParallelFireAndForget(file, null);
+			else if (mouseButtonMask is MouseButtonMask.Right) OpenContextMenuFile(file);
+			return;
+		}
+
+		if (selected.GetTypedMetadata<SharpIdeProjectModel>(0) is { } project)
+		{
+			if (mouseButtonMask is MouseButtonMask.Left && project.IsInvalid) GodotGlobalEvents.Instance.BottomPanelTabExternallySelected.InvokeParallelFireAndForget(BottomPanelType.Problems);
+			else if (mouseButtonMask is MouseButtonMask.Right) OpenContextMenuProject(project);
+			return;
+		}
+
+		if (selected.GetTypedMetadata<SharpIdeFolder>(0) is { } folder)
+		{
+			if (mouseButtonMask is MouseButtonMask.Right) OpenContextMenuFolder(folder, selected);
 		}
 	}
 	
@@ -112,7 +125,7 @@ public partial class SolutionExplorerPanel : MarginContainer
 		var selectedItem = _tree.GetSelected();
 		if (selectedItem is not null)
 		{
-			var selectedFile = selectedItem.GetTypedMetadata<RefCountedContainer<SharpIdeFile>?>(0)?.Item;
+			var selectedFile = selectedItem.GetTypedMetadata<SharpIdeFile>(0);
 			if (selectedFile == file)
 				return;
 		}
@@ -132,7 +145,7 @@ public partial class SolutionExplorerPanel : MarginContainer
 	
 	private static TreeItem? FindItemRecursive(TreeItem item, SharpIdeFile file)
 	{
-		if (item.GetTypedMetadata<RefCountedContainer<SharpIdeFile>?>(0)?.Item == file)
+		if (item.GetTypedMetadata<SharpIdeFile>(0) == file)
 			return item;
 
 		var child = item.GetFirstChild();
@@ -146,6 +159,38 @@ public partial class SolutionExplorerPanel : MarginContainer
 		}
 
 		return null;
+	}
+
+	private async Task OnGitStatusesChanged()
+	{
+		await this.InvokeAsync(() =>
+		{
+			if (IsInstanceValid(_tree) is false || _tree.GetRoot() is null) return;
+			RefreshGitStatusColoursRecursive(_tree.GetRoot());
+			_tree.QueueRedraw();
+		});
+	}
+
+	private void RefreshGitStatusColoursRecursive(TreeItem item)
+	{
+		if (item.GetTypedMetadata<SharpIdeFile>(0) is { } file)
+		{
+			if (GitColours.GetColorForGitFileStatus(file.GitStatus) is { } notNullColor)
+			{
+				item.SetCustomColor(0, notNullColor);
+			}
+			else
+			{
+				item.ClearCustomColor(0);
+			}
+		}
+
+		var child = item.GetFirstChild();
+		while (child is not null)
+		{
+			RefreshGitStatusColoursRecursive(child);
+			child = child.GetNext();
+		}
 	}
 
 	public async Task BindToSolution() => await BindToSolution(SolutionModel);
@@ -201,7 +246,7 @@ public partial class SolutionExplorerPanel : MarginContainer
 	    var folderItem = tree.CreateItem(parent);
 	        folderItem.SetText(0, slnFolder.Name);
 	        folderItem.SetIcon(0, SlnFolderIcon);
-	        folderItem.SetMetadata(0, new RefCountedContainer<SharpIdeSolutionFolder>(slnFolder));
+	        folderItem.SetMetadata(0, new RefCountedContainer(slnFolder));
 
 	        // Observe folder sub-collections
 	        var subFoldersView = slnFolder.Folders.CreateView(y => new TreeItemContainer());
@@ -245,7 +290,7 @@ public partial class SolutionExplorerPanel : MarginContainer
 		var icon = projectModel.IsLoading ? LoadingProjectIcon : projectModel.IsInvalid ? UnloadedProjectIcon : CsprojIcon;
 		projectItem.SetIcon(0, icon);
 		if (projectModel.IsLoading is false && projectModel.IsInvalid) projectItem.SetSuffix(0, " ·  load failed");
-		projectItem.SetMetadata(0, new RefCountedContainer<SharpIdeProjectModel>(projectModel));
+		projectItem.SetMetadata(0, new RefCountedContainer(projectModel));
 		
 		projectModel.MsBuildProjectLoadState.SubscribeOnThreadPool().ObserveOnThreadPool().SubscribeAwait(async (loadState, ct) =>
 		{
@@ -298,7 +343,7 @@ public partial class SolutionExplorerPanel : MarginContainer
 		var folderItem = tree.CreateItem(parent, newStartingIndex);
 		folderItem.SetText(0, sharpIdeFolder.Name);
 		folderItem.SetIcon(0, FolderIcon);
-		folderItem.SetMetadata(0, new RefCountedContainer<SharpIdeFolder>(sharpIdeFolder));
+		folderItem.SetMetadata(0, new RefCountedContainer(sharpIdeFolder));
 		
 		Observable.EveryValueChanged(sharpIdeFolder, folder => folder.Name)
 			.Skip(1).SubscribeOnThreadPool().ObserveOnThreadPool().SubscribeAwait(async (s, ct) =>
@@ -350,7 +395,7 @@ public partial class SolutionExplorerPanel : MarginContainer
 		fileItem.SetIconsForFileExtension(sharpIdeFile);
 		if (GitColours.GetColorForGitFileStatus(sharpIdeFile.GitStatus) is { } notnullColor) fileItem.SetCustomColor(0, notnullColor);
 		else fileItem.ClearCustomColor(0);
-		fileItem.SetMetadata(0, new RefCountedContainer<SharpIdeFile>(sharpIdeFile));
+		fileItem.SetMetadata(0, new RefCountedContainer(sharpIdeFile));
 		
 		Observable.EveryValueChanged(sharpIdeFile, file => file.Name)
 			.Skip(1).SubscribeOnThreadPool().ObserveOnThreadPool().SubscribeAwait(async (s, ct) =>
