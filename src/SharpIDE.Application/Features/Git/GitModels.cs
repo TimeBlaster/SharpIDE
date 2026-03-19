@@ -250,6 +250,50 @@ public sealed class GitStashFileDiffRequest
     public required GitStashFileContentKind ContentKind { get; init; }
 }
 
+public enum GitComparisonTargetKind
+{
+    Ref,
+    WorkingTree
+}
+
+public sealed class GitComparisonTarget
+{
+    public required GitComparisonTargetKind Kind { get; init; }
+    public string? RefName { get; init; }
+    public required string DisplayName { get; init; }
+}
+
+public sealed class GitRefComparisonRequest
+{
+    public required string RepoRootPath { get; init; }
+    public required GitComparisonTarget LeftTarget { get; init; }
+    public required GitComparisonTarget RightTarget { get; init; }
+}
+
+public sealed class GitRefComparisonFile
+{
+    public required string RepoRelativePath { get; init; }
+    public string? OldRepoRelativePath { get; init; }
+    public required string StatusCode { get; init; }
+    public required string DisplayPath { get; init; }
+}
+
+public sealed class GitRefComparisonResult
+{
+    public required GitRefComparisonRequest Request { get; init; }
+    public required IReadOnlyList<GitRefComparisonFile> Files { get; init; }
+}
+
+public sealed class GitRefComparisonFileDiffRequest
+{
+    public required string RepoRootPath { get; init; }
+    public required GitComparisonTarget LeftTarget { get; init; }
+    public required GitComparisonTarget RightTarget { get; init; }
+    public required string RepoRelativePath { get; init; }
+    public string? OldRepoRelativePath { get; init; }
+    public required string StatusCode { get; init; }
+}
+
 public enum GitFileContentViewKind
 {
     Empty,

@@ -88,19 +88,27 @@ public partial class SolutionExplorerPanel : MarginContainer
 	{
 		var selected = _tree.GetSelected();
 		if (selected is null) return;
-		if (HasMultipleNodesSelected()) return;
+		var selectedItems = GetSelectedTreeItems();
 		
 		var mouseButtonMask = (MouseButtonMask)mouseButtonIndex;
 
 		var sharpIdeNode = selected.SharpIdeNode;
 		switch (mouseButtonMask, sharpIdeNode)
 		{
-			case (MouseButtonMask.Left, SharpIdeFile file): GodotGlobalEvents.Instance.FileSelected.InvokeParallelFireAndForget(file, null); break;
-			case (MouseButtonMask.Right, SharpIdeFile file): OpenContextMenuFile(file); break;
-			case (MouseButtonMask.Left, SharpIdeProjectModel { IsInvalid: true }): GodotGlobalEvents.Instance.BottomPanelTabExternallySelected.InvokeParallelFireAndForget(BottomPanelType.Problems); break;
+			case (MouseButtonMask.Left, SharpIdeFile file):
+			{
+				if (HasMultipleNodesSelected()) break;
+				GodotGlobalEvents.Instance.FileSelected.InvokeParallelFireAndForget(file, null); break;
+			}
+			case (MouseButtonMask.Right, SharpIdeFile file): OpenContextMenuFile(GetSelectedFileContextItems(selectedItems)); break;
+			case (MouseButtonMask.Left, SharpIdeProjectModel { IsInvalid: true }):
+			{
+				if (HasMultipleNodesSelected()) break;
+				GodotGlobalEvents.Instance.BottomPanelTabExternallySelected.InvokeParallelFireAndForget(BottomPanelType.Problems); break;
+			}
 			case (MouseButtonMask.Right, SharpIdeProjectModel project): OpenContextMenuProject(project); break;
 			case (MouseButtonMask.Left, SharpIdeFolder): break;
-			case (MouseButtonMask.Right, SharpIdeFolder folder): OpenContextMenuFolder(folder, selected); break;
+			case (MouseButtonMask.Right, SharpIdeFolder folder): OpenContextMenuFolder(GetSelectedFolderContextItems(selectedItems)); break;
 			case (MouseButtonMask.Left, SharpIdeSolutionFolder): break;
 			default: break;
 		}

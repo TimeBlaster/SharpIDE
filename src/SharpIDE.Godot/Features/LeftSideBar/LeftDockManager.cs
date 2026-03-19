@@ -1,3 +1,4 @@
+using SharpIDE.Godot.Features.Compare;
 using Godot;
 using SharpIDE.Godot.Features.Git;
 using SharpIDE.Godot.Features.SolutionExplorer;
@@ -8,21 +9,25 @@ public partial class LeftDockManager : PanelContainer
 {
     private SolutionExplorerPanel _solutionExplorerPanel = null!;
     private CommitPanel _commitPanel = null!;
+    private ComparePanel _comparePanel = null!;
 
     private Dictionary<LeftDockType, Control> _dockMap = [];
 
     public SolutionExplorerPanel SolutionExplorerPanel => _solutionExplorerPanel;
     public CommitPanel CommitPanel => _commitPanel;
+    public ComparePanel ComparePanel => _comparePanel;
 
     public override void _Ready()
     {
         _solutionExplorerPanel = GetNode<SolutionExplorerPanel>("%SolutionExplorerPanel");
         _commitPanel = GetNode<CommitPanel>("%CommitPanel");
+        _comparePanel = GetNode<ComparePanel>("%ComparePanel");
 
         _dockMap = new Dictionary<LeftDockType, Control>
         {
             { LeftDockType.SolutionExplorer, _solutionExplorerPanel },
-            { LeftDockType.Commit, _commitPanel }
+            { LeftDockType.Commit, _commitPanel },
+            { LeftDockType.Compare, _comparePanel }
         };
 
         GodotGlobalEvents.Instance.LeftDockSelected.Subscribe(OnLeftDockSelected);

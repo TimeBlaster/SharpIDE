@@ -5,6 +5,7 @@
 [ext_resource type="ButtonGroup" uid="uid://c2nmo2x3va0gi" path="res://Features/LeftSideBar/LeftBottomSidebarButtonGroup.tres" id="2_1aad6"]
 [ext_resource type="Texture2D" uid="uid://ccj0dw81x3bkc" path="res://Features/LeftSideBar/Resources/SidebarFolder.svg" id="2_jg03n"]
 [ext_resource type="Texture2D" uid="uid://g7a0eu4cqjxl" path="res://Features/LeftSideBar/Resources/Commit.svg" id="3_7ir2d"]
+[ext_resource type="Texture2D" uid="uid://c7wq5n0h3cmp5" path="res://Features/LeftSideBar/Resources/SidebarCompare.svg" id="3_compare"]
 [ext_resource type="Texture2D" uid="uid://uukf1nwjhthv" path="res://Features/LeftSideBar/Resources/SidebarProblem.svg" id="4_prju6"]
 [ext_resource type="Texture2D" uid="uid://cre7q0efp4vrq" path="res://Features/LeftSideBar/Resources/SidebarRun.svg" id="5_jg03n"]
 [ext_resource type="Texture2D" uid="uid://b0170ypw8uf3a" path="res://Features/LeftSideBar/Resources/Terminal.svg" id="6_ddh6f"]
@@ -64,6 +65,21 @@ toggle_mode = true
 button_group = ExtResource("1_wgo0d")
 text = "Commit"
 icon = ExtResource("3_7ir2d")
+icon_alignment = 1
+vertical_icon_alignment = 0
+expand_icon = true
+
+[node name="CompareButton" type="Button" parent="MarginContainer/VBoxContainer" unique_id=2041033397]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(0, 50)
+layout_mode = 2
+theme_type_variation = &"IdeSidebarButton"
+theme_override_font_sizes/font_size = 13
+toggle_mode = true
+button_group = ExtResource("1_wgo0d")
+text = "Compare"
+icon = ExtResource("3_compare")
 icon_alignment = 1
 vertical_icon_alignment = 0
 expand_icon = true

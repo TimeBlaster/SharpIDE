@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using SharpIDE.Application.Features.Analysis;
 using SharpIDE.Application.Features.Build;
+using SharpIDE.Application.Features.Compare;
 using SharpIDE.Application.Features.Debugging;
 using SharpIDE.Application.Features.Editor;
 using SharpIDE.Application.Features.Evaluation;
@@ -31,6 +32,7 @@ public static class DependencyInjection
 		services.AddScoped<DotnetUserSecretsService>();
 		services.AddScoped<NugetClientService>();
 		services.AddScoped<TestRunnerService>();
+		services.AddScoped<CompareService>();
 		services.AddScoped<NugetPackageIconCacheService>();
 		services.AddScoped<IdeFileWatcher>();
 		services.AddScoped<IdeNavigationHistoryService>();

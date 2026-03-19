@@ -159,6 +159,12 @@ public static class NodeExtensions
             return treeItem.TryGetAssociatedValue<T>(out var value) ? value : default;
         }
 
+        public T? GetTypedMetadata<T>(int metadataSlot)
+        {
+            _ = metadataSlot;
+            return treeItem.GetAssociatedValue<T>();
+        }
+
         public bool TryGetAssociatedValue<T>(out T? value)
         {
             if (TreeItemAssociatedValueMap.TryGetValue(treeItem, out var store)
@@ -171,6 +177,12 @@ public static class NodeExtensions
 
             value = default;
             return false;
+        }
+
+        public void SetTypedMetadata<T>(int metadataSlot, T? value)
+        {
+            _ = metadataSlot;
+            treeItem.SetAssociatedValue(value);
         }
 
         public void SetAssociatedValue<T>(T? value)

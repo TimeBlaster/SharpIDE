@@ -7,6 +7,7 @@ public partial class LeftSideBar : Panel
 {
     private Button _slnExplorerButton = null!;
     private Button _commitButton = null!;
+    private Button _compareButton = null!;
     // These are in a ButtonGroup, which handles mutual exclusivity of being toggled on
     private Button _problemsButton = null!;
     private Button _gitButton = null!;
@@ -21,6 +22,7 @@ public partial class LeftSideBar : Panel
     {
         _slnExplorerButton = GetNode<Button>("%SlnExplorerButton");
         _commitButton = GetNode<Button>("%CommitButton");
+        _compareButton = GetNode<Button>("%CompareButton");
         _problemsButton = GetNode<Button>("%ProblemsButton");
         _gitButton = GetNode<Button>("%GitButton");
         _runButton = GetNode<Button>("%RunButton");
@@ -29,6 +31,7 @@ public partial class LeftSideBar : Panel
         _ideDiagnosticsButton = GetNode<Button>("%IdeDiagnosticsButton");
         _nugetButton = GetNode<Button>("%NugetButton");
         _testExplorerButton = GetNode<Button>("%TestExplorerButton");
+        _compareButton.Visible = false;
 
         _slnExplorerButton.Toggled += toggledOn =>
         {
@@ -37,6 +40,10 @@ public partial class LeftSideBar : Panel
         _commitButton.Toggled += toggledOn =>
         {
             if (toggledOn) GodotGlobalEvents.Instance.LeftDockSelected.InvokeParallelFireAndForget(LeftDockType.Commit);
+        };
+        _compareButton.Toggled += toggledOn =>
+        {
+            if (toggledOn) GodotGlobalEvents.Instance.LeftDockSelected.InvokeParallelFireAndForget(LeftDockType.Compare);
         };
         _gitButton.Toggled += toggledOn => GodotGlobalEvents.Instance.BottomPanelTabSelected.InvokeParallelFireAndForget(toggledOn ? BottomPanelType.Git : null);
         _problemsButton.Toggled += toggledOn => GodotGlobalEvents.Instance.BottomPanelTabSelected.InvokeParallelFireAndForget(toggledOn ? BottomPanelType.Problems : null);
@@ -48,12 +55,14 @@ public partial class LeftSideBar : Panel
         _testExplorerButton.Toggled += toggledOn => GodotGlobalEvents.Instance.BottomPanelTabSelected.InvokeParallelFireAndForget(toggledOn ? BottomPanelType.TestExplorer : null);
         GodotGlobalEvents.Instance.BottomPanelTabExternallySelected.Subscribe(OnBottomPanelTabExternallySelected);
         GodotGlobalEvents.Instance.LeftDockExternallySelected.Subscribe(OnLeftDockExternallySelected);
+        GodotGlobalEvents.Instance.CompareVisibilityChanged.Subscribe(OnCompareVisibilityChanged);
     }
 
     public override void _ExitTree()
     {
         GodotGlobalEvents.Instance.BottomPanelTabExternallySelected.Unsubscribe(OnBottomPanelTabExternallySelected);
         GodotGlobalEvents.Instance.LeftDockExternallySelected.Unsubscribe(OnLeftDockExternallySelected);
+        GodotGlobalEvents.Instance.CompareVisibilityChanged.Unsubscribe(OnCompareVisibilityChanged);
     }
 
     private async Task OnBottomPanelTabExternallySelected(BottomPanelType arg)
@@ -83,7 +92,20 @@ public partial class LeftSideBar : Panel
             {
                 case LeftDockType.SolutionExplorer: _slnExplorerButton.ButtonPressed = true; break;
                 case LeftDockType.Commit: _commitButton.ButtonPressed = true; break;
+                case LeftDockType.Compare: _compareButton.ButtonPressed = true; break;
                 default: throw new ArgumentOutOfRangeException(nameof(arg), arg, null);
+            }
+        });
+    }
+
+    private async Task OnCompareVisibilityChanged(bool isVisible)
+    {
+        await this.InvokeAsync(() =>
+        {
+            _compareButton.Visible = isVisible;
+            if (!isVisible && _compareButton.ButtonPressed)
+            {
+                _commitButton.ButtonPressed = true;
             }
         });
     }

@@ -51,6 +51,89 @@ public class GitServiceRefActionsTests
     }
 
     [Fact]
+    public async Task GetRefComparison_BranchToWorkingTree_ReturnsModifiedFile()
+    {
+        using var repo = await TempGitRepo.CreateAsync();
+        repo.WriteFile("sample.txt", "base");
+        repo.Git("add sample.txt");
+        repo.Commit("initial");
+
+        repo.Git("checkout -b feature");
+        repo.WriteFile("sample.txt", "feature branch");
+        repo.Git("add sample.txt");
+        repo.Commit("feature");
+
+        repo.Git("checkout main");
+        repo.WriteFile("sample.txt", "working tree");
+
+        var result = await _gitService.GetRefComparison(new GitRefComparisonRequest
+        {
+            RepoRootPath = repo.RootPath,
+            LeftTarget = RefTarget("refs/heads/feature", "feature"),
+            RightTarget = WorkingTreeTarget()
+        }, TestContext.Current.CancellationToken);
+
+        result.Files.Should().ContainSingle(file => file.RepoRelativePath == "sample.txt" && file.StatusCode == "M");
+    }
+
+    [Fact]
+    public async Task GetRefComparison_CurrentBranchToTag_Rename_UsesRenameStatus()
+    {
+        using var repo = await TempGitRepo.CreateAsync();
+        repo.WriteFile("old-name.txt", "before");
+        repo.Git("add old-name.txt");
+        repo.Commit("initial");
+        repo.Git("tag v1");
+        repo.Git("mv old-name.txt new-name.txt");
+        repo.Git("add -A");
+        repo.Commit("rename");
+
+        var result = await _gitService.GetRefComparison(new GitRefComparisonRequest
+        {
+            RepoRootPath = repo.RootPath,
+            LeftTarget = RefTarget("refs/heads/main", "main"),
+            RightTarget = RefTarget("refs/tags/v1", "v1")
+        }, TestContext.Current.CancellationToken);
+
+        result.Files.Should().ContainSingle(file =>
+            file.StatusCode == "R" &&
+            file.OldRepoRelativePath == "new-name.txt" &&
+            file.RepoRelativePath == "old-name.txt");
+    }
+
+    [Fact]
+    public async Task GetRefComparisonFileDiffView_WorkingTreeComparison_IsReadOnly()
+    {
+        using var repo = await TempGitRepo.CreateAsync();
+        repo.WriteFile("sample.txt", "base");
+        repo.Git("add sample.txt");
+        repo.Commit("initial");
+
+        repo.Git("checkout -b feature");
+        repo.WriteFile("sample.txt", "feature");
+        repo.Git("add sample.txt");
+        repo.Commit("feature");
+
+        repo.Git("checkout main");
+        repo.WriteFile("sample.txt", "working tree");
+
+        var diffView = await _gitService.GetRefComparisonFileDiffView(new GitRefComparisonFileDiffRequest
+        {
+            RepoRootPath = repo.RootPath,
+            LeftTarget = RefTarget("refs/heads/feature", "feature"),
+            RightTarget = WorkingTreeTarget(),
+            RepoRelativePath = "sample.txt",
+            OldRepoRelativePath = null,
+            StatusCode = "M"
+        }, TestContext.Current.CancellationToken);
+
+        diffView.CanEditCurrent.Should().BeFalse();
+        diffView.BaseLabel.Should().Be("feature");
+        diffView.CurrentLabel.Should().Be("Working tree");
+        diffView.Rows.Should().Contain(row => row.Kind == GitDiffDisplayRowKind.ModifiedLeft || row.Kind == GitDiffDisplayRowKind.ModifiedRight);
+    }
+
+    [Fact]
     public async Task CheckoutRef_LocalBranch_ChecksOutBranch()
     {
         using var repo = await TempGitRepo.CreateAsync();
@@ -314,6 +397,26 @@ public class GitServiceRefActionsTests
         }
 
         return stdOut.Replace("\r\n", "\n");
+    }
+
+    private static GitComparisonTarget RefTarget(string refName, string displayName)
+    {
+        return new GitComparisonTarget
+        {
+            Kind = GitComparisonTargetKind.Ref,
+            RefName = refName,
+            DisplayName = displayName
+        };
+    }
+
+    private static GitComparisonTarget WorkingTreeTarget()
+    {
+        return new GitComparisonTarget
+        {
+            Kind = GitComparisonTargetKind.WorkingTree,
+            RefName = null,
+            DisplayName = "Working tree"
+        };
     }
 
     private sealed class TempDirectory : IDisposable

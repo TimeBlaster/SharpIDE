@@ -1,15 +1,17 @@
 using Godot;
 using SharpIDE.Application;
 using SharpIDE.Application.Features.Analysis;
+using SharpIDE.Application.Features.Compare;
 using SharpIDE.Application.Features.FileWatching;
 using SharpIDE.Application.Features.Git;
 using SharpIDE.Application.Features.SolutionDiscovery;
 using SharpIDE.Application.Features.SolutionDiscovery.VsPersistence;
 using SharpIDE.Godot.Features.CodeEditor;
+using SharpIDE.Godot.Features.Git;
 
-namespace SharpIDE.Godot.Features.Git;
+namespace SharpIDE.Godot.Features.Compare;
 
-public partial class GitDiffViewer : MarginContainer
+public partial class DiffViewer : MarginContainer
 {
     private static readonly PackedScene SharpIdeCodeEditScene = GD.Load<PackedScene>("res://Features/CodeEditor/SharpIdeCodeEdit.tscn");
 
@@ -62,10 +64,13 @@ public partial class GitDiffViewer : MarginContainer
     private DateTimeOffset _suppressRepositoryRefreshUntil = DateTimeOffset.MinValue;
     private IReadOnlyList<string> _adjacentDiffPaths = [];
     private int _currentDiffPathIndex = -1;
+    private FileCompareRequest? _fileComparisonRequest;
     private GitCommitFileDiffRequest? _historicalCommitDiffRequest;
     private GitCommitWorkingTreeDiffRequest? _historicalCommitWorkingTreeDiffRequest;
     private GitStashFileDiffRequest? _historicalStashDiffRequest;
+    private GitRefComparisonFileDiffRequest? _historicalRefComparisonDiffRequest;
 
+    [Inject] private readonly CompareService _compareService = null!;
     [Inject] private readonly GitService _gitService = null!;
     [Inject] private readonly GitRepositoryMonitor _gitRepositoryMonitor = null!;
     [Inject] private readonly FileChangedService _fileChangedService = null!;
@@ -133,10 +138,12 @@ public partial class GitDiffViewer : MarginContainer
 
     public async Task LoadFromPath(string absolutePath)
     {
+        _fileComparisonRequest = null;
         _isHistoricalReadOnly = false;
         _historicalCommitDiffRequest = null;
         _historicalCommitWorkingTreeDiffRequest = null;
         _historicalStashDiffRequest = null;
+        _historicalRefComparisonDiffRequest = null;
         var scrollToFirstChange = false;
         if (!string.Equals(SourcePath, absolutePath, StringComparison.Ordinal))
         {
@@ -155,10 +162,12 @@ public partial class GitDiffViewer : MarginContainer
 
     public async Task LoadHistoricalDiff(GitCommitFileDiffRequest request)
     {
+        _fileComparisonRequest = null;
         _isHistoricalReadOnly = true;
         _historicalCommitDiffRequest = request;
         _historicalCommitWorkingTreeDiffRequest = null;
         _historicalStashDiffRequest = null;
+        _historicalRefComparisonDiffRequest = null;
         SourcePath = Path.Combine(request.RepoRootPath, request.RepoRelativePath.Replace('/', Path.DirectorySeparatorChar));
         PreviewKey = $"{request.CommitSha}:{request.RepoRelativePath}";
         _listenForRepositoryChanges = false;
@@ -187,10 +196,12 @@ public partial class GitDiffViewer : MarginContainer
 
     public async Task LoadHistoricalDiff(GitStashFileDiffRequest request)
     {
+        _fileComparisonRequest = null;
         _isHistoricalReadOnly = true;
         _historicalCommitDiffRequest = null;
         _historicalCommitWorkingTreeDiffRequest = null;
         _historicalStashDiffRequest = request;
+        _historicalRefComparisonDiffRequest = null;
         SourcePath = Path.Combine(request.RepoRootPath, request.RepoRelativePath.Replace('/', Path.DirectorySeparatorChar));
         PreviewKey = $"{request.StashRef}:{request.RepoRelativePath}";
         _listenForRepositoryChanges = false;
@@ -201,9 +212,53 @@ public partial class GitDiffViewer : MarginContainer
         await RefreshAsync(scrollToFirstChange: true);
     }
 
+    public async Task LoadHistoricalDiff(GitRefComparisonFileDiffRequest request)
+    {
+        _fileComparisonRequest = null;
+        _isHistoricalReadOnly = true;
+        _historicalCommitDiffRequest = null;
+        _historicalStashDiffRequest = null;
+        _historicalRefComparisonDiffRequest = request;
+        SourcePath = Path.Combine(request.RepoRootPath, request.RepoRelativePath.Replace('/', Path.DirectorySeparatorChar));
+        var leftKey = request.LeftTarget.Kind is GitComparisonTargetKind.WorkingTree
+            ? "worktree"
+            : request.LeftTarget.RefName ?? request.LeftTarget.DisplayName;
+        var rightKey = request.RightTarget.Kind is GitComparisonTargetKind.WorkingTree
+            ? "worktree"
+            : request.RightTarget.RefName ?? request.RightTarget.DisplayName;
+        PreviewKey = $"{leftKey}|{rightKey}|{request.RepoRelativePath}";
+        _listenForRepositoryChanges = false;
+        _session.HorizontalScroll = 0;
+        _session.VerticalScroll = 0;
+        _session.CaretLine = 0;
+        _session.CaretColumn = 0;
+        await RefreshAsync(scrollToFirstChange: true);
+    }
+
+    public async Task LoadFileComparison(FileCompareRequest request)
+    {
+        _fileComparisonRequest = request;
+        _isHistoricalReadOnly = false;
+        _historicalCommitDiffRequest = null;
+        _historicalStashDiffRequest = null;
+        _historicalRefComparisonDiffRequest = null;
+        SourcePath = !string.IsNullOrWhiteSpace(request.RightAbsolutePath)
+            ? request.RightAbsolutePath
+            : request.LeftAbsolutePath;
+        PreviewKey = request.ComparisonKey;
+        _listenForRepositoryChanges = false;
+        _adjacentDiffPaths = [];
+        _currentDiffPathIndex = -1;
+        _session.HorizontalScroll = 0;
+        _session.VerticalScroll = 0;
+        _session.CaretLine = 0;
+        _session.CaretColumn = 0;
+        await RefreshAsync(scrollToFirstChange: true);
+    }
+
     private async Task EnsureRepositoryMonitoringAsync()
     {
-        if (_isHistoricalReadOnly || string.IsNullOrWhiteSpace(SourcePath))
+        if (_fileComparisonRequest is not null || _isHistoricalReadOnly || string.IsNullOrWhiteSpace(SourcePath))
         {
             _listenForRepositoryChanges = false;
             return;
@@ -257,13 +312,26 @@ public partial class GitDiffViewer : MarginContainer
 
         CaptureEditorViewportState();
         _isRefreshing = true;
-        using var activity = traceOperation?.StartChild($"{nameof(GitDiffViewer)}.{nameof(RefreshAsync)}")
-            ?? SharpIdeOtel.Source.StartActivity($"{nameof(GitDiffViewer)}.{nameof(RefreshAsync)}");
+        using var activity = traceOperation?.StartChild($"{nameof(DiffViewer)}.{nameof(RefreshAsync)}")
+            ?? SharpIdeOtel.Source.StartActivity($"{nameof(DiffViewer)}.{nameof(RefreshAsync)}");
         activity?.SetTag("git.diff.scroll_to_first_change", scrollToFirstChange);
         activity?.SetTag("git.diff.source_path", SourcePath);
         try
         {
-            if (_isHistoricalReadOnly)
+            if (_fileComparisonRequest is not null)
+            {
+                var diffView = await _compareService.GetFileDiffView(_fileComparisonRequest);
+                CurrentView = new GitFileContentViewModel
+                {
+                    Kind = GitFileContentViewKind.Diff,
+                    AbsolutePath = diffView.AbsolutePath,
+                    RepoRelativePath = diffView.RepoRelativePath,
+                    DiffView = diffView
+                };
+                _adjacentDiffPaths = [];
+                _currentDiffPathIndex = -1;
+            }
+            else if (_isHistoricalReadOnly)
             {
                 GitDiffViewModel diffView;
                 if (_historicalCommitDiffRequest is not null)
@@ -277,6 +345,10 @@ public partial class GitDiffViewer : MarginContainer
                 else if (_historicalStashDiffRequest is not null)
                 {
                     diffView = await _gitService.GetStashFileDiffView(_historicalStashDiffRequest);
+                }
+                else if (_historicalRefComparisonDiffRequest is not null)
+                {
+                    diffView = await _gitService.GetRefComparisonFileDiffView(_historicalRefComparisonDiffRequest);
                 }
                 else
                 {
@@ -392,8 +464,8 @@ public partial class GitDiffViewer : MarginContainer
         bool scrollToFirstChange,
         GitDiffTraceOperation? traceOperation)
     {
-        using var activity = traceOperation?.StartChild($"{nameof(GitDiffViewer)}.{nameof(PopulateDiffViewAsync)}")
-            ?? SharpIdeOtel.Source.StartActivity($"{nameof(GitDiffViewer)}.{nameof(PopulateDiffViewAsync)}");
+        using var activity = traceOperation?.StartChild($"{nameof(DiffViewer)}.{nameof(PopulateDiffViewAsync)}")
+            ?? SharpIdeOtel.Source.StartActivity($"{nameof(DiffViewer)}.{nameof(PopulateDiffViewAsync)}");
         _baseEditorLabel.Text = diffView.BaseLabel;
         _currentEditorLabel.Text = diffView.CurrentLabel;
 
@@ -440,19 +512,19 @@ public partial class GitDiffViewer : MarginContainer
                     ConfigureDiffEditor(_currentDiffEditor);
                 }
 
-                using (traceOperation?.StartChild($"{nameof(GitDiffViewer)}.ApplyLineHighlights"))
+                using (traceOperation?.StartChild($"{nameof(DiffViewer)}.ApplyLineHighlights"))
                 {
                     _baseEditor?.SetGitDiffLineBackgrounds(GitDiffEditorDecorations.BuildLineHighlights(diffView, rowStatesByRowId, isLeftSide: true));
                     _currentDiffEditor?.SetGitDiffLineBackgrounds(GitDiffEditorDecorations.BuildLineHighlights(diffView, rowStatesByRowId, isLeftSide: false));
                 }
 
-                using (traceOperation?.StartChild($"{nameof(GitDiffViewer)}.ApplyInlineHighlights"))
+                using (traceOperation?.StartChild($"{nameof(DiffViewer)}.ApplyInlineHighlights"))
                 {
                     _baseEditor?.SetGitDiffInlineHighlights(GitDiffEditorDecorations.BuildInlineHighlights(diffView, rowStatesByRowId, isLeftSide: true));
                     _currentDiffEditor?.SetGitDiffInlineHighlights(GitDiffEditorDecorations.BuildInlineHighlights(diffView, rowStatesByRowId, isLeftSide: false));
                 }
 
-                using (traceOperation?.StartChild($"{nameof(GitDiffViewer)}.ApplyScrollMarkers"))
+                using (traceOperation?.StartChild($"{nameof(DiffViewer)}.ApplyScrollMarkers"))
                 {
                     _baseScrollbarOverlay.SetMarkers(GitDiffScrollMarkerBuilder.BuildBaseDocumentMarkers(diffView, rowStatesByRowId));
                     _currentDiffEditor?.SetGitDiffScrollMarkers(GitDiffScrollMarkerBuilder.BuildCurrentDocumentMarkers(diffView, rowStatesByRowId));
@@ -462,7 +534,7 @@ public partial class GitDiffViewer : MarginContainer
                 SyncBaseExternalScrollBar();
                 _actionGutter.InvalidateLayout();
                 SyncGutterSpacerHeight();
-                using (traceOperation?.StartChild($"{nameof(GitDiffViewer)}.ConfigureDiffChrome"))
+                using (traceOperation?.StartChild($"{nameof(DiffViewer)}.ConfigureDiffChrome"))
                 {
                     _actionGutter.Configure(diffView, rowStatesByRowId, unstagedActions, stagedActions);
                     _connectorOverlay.Configure(diffView, rowStatesByRowId);
@@ -471,7 +543,7 @@ public partial class GitDiffViewer : MarginContainer
 
             await this.InvokeDeferredAsync(() =>
             {
-                using var deferredUiActivity = traceOperation?.StartChild($"{nameof(GitDiffViewer)}.FinalizeDiffRedraw");
+                using var deferredUiActivity = traceOperation?.StartChild($"{nameof(DiffViewer)}.FinalizeDiffRedraw");
                 RestoreEditorViewportState(scrollToFirstChange);
                 _actionGutter.InvalidateLayout();
                 _connectorOverlay.InvalidateLayout();
@@ -488,7 +560,7 @@ public partial class GitDiffViewer : MarginContainer
 
         async Task SetBasePreviewTextAsync()
         {
-            using var setBasePreviewActivity = traceOperation?.StartChild($"{nameof(GitDiffViewer)}.SetBasePreviewText");
+            using var setBasePreviewActivity = traceOperation?.StartChild($"{nameof(DiffViewer)}.SetBasePreviewText");
             await _baseEditor!.SetPreviewTextForFile(sharpIdeFile, diffView.BaseDisplayText, editable: false, clearGitDiffDecorations: false);
             _session.BaseDisplayText = diffView.BaseDisplayText;
         }
@@ -511,7 +583,7 @@ public partial class GitDiffViewer : MarginContainer
 
         async Task SetCurrentEditorTextAsync()
         {
-            using var setCurrentPreviewActivity = traceOperation?.StartChild($"{nameof(GitDiffViewer)}.SetCurrentPreviewText");
+            using var setCurrentPreviewActivity = traceOperation?.StartChild($"{nameof(DiffViewer)}.SetCurrentPreviewText");
             if (ShouldUseBoundCurrentEditor(diffView))
             {
                 await _currentDiffEditor!.SetSharpIdeFile(sharpIdeFile);
@@ -987,7 +1059,7 @@ public partial class GitDiffViewer : MarginContainer
 
     private async Task SaveCurrentMergeTextAsync()
     {
-        var traceOperation = CreateGitActionTrace($"{nameof(GitDiffViewer)}.{nameof(SaveCurrentMergeTextAsync)}");
+        var traceOperation = CreateGitActionTrace($"{nameof(DiffViewer)}.{nameof(SaveCurrentMergeTextAsync)}");
         await RunGitActionAsync(() => _gitService.SaveMergeConflictCurrent(SourcePath, _currentCodeEdit.Text), traceOperation);
     }
 
@@ -1066,35 +1138,35 @@ public partial class GitDiffViewer : MarginContainer
 
     private async Task StageLinesAsync(IReadOnlyList<string> lineActionIds)
     {
-        var traceOperation = CreateGitActionTrace($"{nameof(GitDiffViewer)}.{nameof(StageLinesAsync)}");
+        var traceOperation = CreateGitActionTrace($"{nameof(DiffViewer)}.{nameof(StageLinesAsync)}");
         traceOperation.SetTag("git.diff.line_action.count", lineActionIds.Count);
         await RunGitActionAsync(() => _gitService.StageLines(SourcePath, lineActionIds), traceOperation);
     }
 
     private async Task StageChunkAsync(string chunkId)
     {
-        var traceOperation = CreateGitActionTrace($"{nameof(GitDiffViewer)}.{nameof(StageChunkAsync)}");
+        var traceOperation = CreateGitActionTrace($"{nameof(DiffViewer)}.{nameof(StageChunkAsync)}");
         traceOperation.SetTag("git.diff.chunk_id", chunkId);
         await RunGitActionAsync(() => _gitService.StageChunk(SourcePath, chunkId), traceOperation);
     }
 
     private async Task UnstageLinesAsync(IReadOnlyList<string> lineActionIds)
     {
-        var traceOperation = CreateGitActionTrace($"{nameof(GitDiffViewer)}.{nameof(UnstageLinesAsync)}");
+        var traceOperation = CreateGitActionTrace($"{nameof(DiffViewer)}.{nameof(UnstageLinesAsync)}");
         traceOperation.SetTag("git.diff.line_action.count", lineActionIds.Count);
         await RunGitActionAsync(() => _gitService.UnstageLines(SourcePath, lineActionIds), traceOperation);
     }
 
     private async Task UnstageChunkAsync(string chunkId)
     {
-        var traceOperation = CreateGitActionTrace($"{nameof(GitDiffViewer)}.{nameof(UnstageChunkAsync)}");
+        var traceOperation = CreateGitActionTrace($"{nameof(DiffViewer)}.{nameof(UnstageChunkAsync)}");
         traceOperation.SetTag("git.diff.chunk_id", chunkId);
         await RunGitActionAsync(() => _gitService.UnstageChunk(SourcePath, chunkId), traceOperation);
     }
 
     private async Task RevertChunkAsync(string chunkId)
     {
-        var traceOperation = CreateGitActionTrace($"{nameof(GitDiffViewer)}.{nameof(RevertChunkAsync)}");
+        var traceOperation = CreateGitActionTrace($"{nameof(DiffViewer)}.{nameof(RevertChunkAsync)}");
         traceOperation.SetTag("git.diff.chunk_id", chunkId);
         await RunGitRevertActionAsync(chunkId, traceOperation);
     }
@@ -1133,7 +1205,7 @@ public partial class GitDiffViewer : MarginContainer
         {
             await SaveBoundFileIfDirtyAsync();
             _suppressRepositoryRefreshUntil = DateTimeOffset.UtcNow.AddMilliseconds(750);
-            using (traceOperation.StartChild($"{nameof(GitDiffViewer)}.ApplyGitAction"))
+            using (traceOperation.StartChild($"{nameof(DiffViewer)}.ApplyGitAction"))
             {
                 await action();
             }
@@ -1147,7 +1219,7 @@ public partial class GitDiffViewer : MarginContainer
         {
             try
             {
-                using (traceOperation.StartChild($"{nameof(GitDiffViewer)}.RefreshAfterGitAction"))
+                using (traceOperation.StartChild($"{nameof(DiffViewer)}.RefreshAfterGitAction"))
                 {
                     await RefreshAsync(traceOperation: traceOperation);
                 }
@@ -1177,7 +1249,7 @@ public partial class GitDiffViewer : MarginContainer
         {
             await SaveBoundFileIfDirtyAsync();
             _suppressRepositoryRefreshUntil = DateTimeOffset.UtcNow.AddMilliseconds(750);
-            using (traceOperation.StartChild($"{nameof(GitDiffViewer)}.ApplyGitAction"))
+            using (traceOperation.StartChild($"{nameof(DiffViewer)}.ApplyGitAction"))
             {
                 await _gitService.RevertChunk(SourcePath, chunkId);
             }
@@ -1185,7 +1257,7 @@ public partial class GitDiffViewer : MarginContainer
             var updatedText = File.Exists(SourcePath)
                 ? await File.ReadAllTextAsync(SourcePath)
                 : string.Empty;
-            using (traceOperation.StartChild($"{nameof(GitDiffViewer)}.{nameof(ApplyUpdatedTextInEditorAsync)}"))
+            using (traceOperation.StartChild($"{nameof(DiffViewer)}.{nameof(ApplyUpdatedTextInEditorAsync)}"))
             {
                 await ApplyUpdatedTextInEditorAsync(updatedText);
             }
@@ -1199,7 +1271,7 @@ public partial class GitDiffViewer : MarginContainer
         {
             try
             {
-                using (traceOperation.StartChild($"{nameof(GitDiffViewer)}.RefreshAfterGitAction"))
+                using (traceOperation.StartChild($"{nameof(DiffViewer)}.RefreshAfterGitAction"))
                 {
                     await RefreshAsync(traceOperation: traceOperation);
                 }
@@ -1678,6 +1750,10 @@ public partial class GitDiffViewer : MarginContainer
             ?? 0;
         var includedCount = CurrentView?.StagedActions?.LineActions.Count ?? 0;
         _summaryLabel.Text = diffView is null ? string.Empty : $"{changeCount} differences, {includedCount} included";
+        if (diffView is not null && !diffView.CanStageLines && !diffView.CanUnstageLines && !diffView.CanStageChunks && !diffView.CanUnstageChunks)
+        {
+            _summaryLabel.Text = $"{changeCount} differences";
+        }
 
         var changeTargets = diffView is null
             ? []
@@ -1689,7 +1765,7 @@ public partial class GitDiffViewer : MarginContainer
         var caretLine = _currentDiffEditor?.GetCaretLine() ?? 0;
         _previousChangeButton.Disabled = changeTargets.Length is 0 || changeTargets.All(line => line >= caretLine);
         _nextChangeButton.Disabled = changeTargets.Length is 0 || changeTargets.All(line => line <= caretLine);
-        _editSourceButton.Disabled = _session.BoundFile is null || _isHistoricalReadOnly;
+        _editSourceButton.Disabled = _session.BoundFile is null || (_isHistoricalReadOnly && _fileComparisonRequest is null);
         _previousDiffButton.Disabled = _currentDiffPathIndex <= 0;
         _nextDiffButton.Disabled = _currentDiffPathIndex < 0 || _currentDiffPathIndex >= _adjacentDiffPaths.Count - 1;
     }
@@ -1697,7 +1773,7 @@ public partial class GitDiffViewer : MarginContainer
     private async Task LoadAdjacentDiffPathsAsync()
     {
         var solution = _solutionAccessor.SolutionModel;
-        if (solution is null || string.IsNullOrWhiteSpace(SourcePath))
+        if (_fileComparisonRequest is not null || solution is null || string.IsNullOrWhiteSpace(SourcePath))
         {
             _adjacentDiffPaths = [];
             _currentDiffPathIndex = -1;
