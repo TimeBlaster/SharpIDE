@@ -4,13 +4,14 @@ using Ardalis.GuardClauses;
 using Godot;
 using R3;
 using SharpIDE.Application.Features.Analysis;
+using SharpIDE.Application.Features.Compare;
 using SharpIDE.Application.Features.Debugging;
 using SharpIDE.Application.Features.Events;
 using SharpIDE.Application.Features.Git;
 using SharpIDE.Application.Features.Run;
 using SharpIDE.Application.Features.SolutionDiscovery;
 using SharpIDE.Application.Features.SolutionDiscovery.VsPersistence;
-using SharpIDE.Godot.Features.Git;
+using SharpIDE.Godot.Features.Compare;
 using SharpIDE.Godot.Features.IdeSettings;
 using SharpIDE.Godot.Features.SolutionExplorer;
 
@@ -22,7 +23,7 @@ public partial class CodeEditorPanel : MarginContainer
 	public Texture2D CsFileTexture { get; set; } = null!;
 	public SharpIdeSolutionModel Solution { get; set; } = null!;
 	private PackedScene _sharpIdeCodeEditScene = GD.Load<PackedScene>("res://Features/CodeEditor/SharpIdeCodeEdit.tscn");
-	private PackedScene _gitDiffViewerScene = GD.Load<PackedScene>("res://Features/Git/GitDiffViewer.tscn");
+	private PackedScene _diffViewerScene = GD.Load<PackedScene>("res://Features/Compare/DiffViewer.tscn");
 	private Texture2D _gitPreviewIcon = GD.Load<Texture2D>("res://Resources/refresh.svg");
 	private TabContainer _tabContainer = null!;
 	private ConcurrentDictionary<SharpIdeProjectModel, ExecutionStopInfo> _debuggerExecutionStopInfoByProject = [];
@@ -44,6 +45,8 @@ public partial class CodeEditorPanel : MarginContainer
 		GodotGlobalEvents.Instance.GitCommitDiffRequested.Subscribe(OnGitCommitDiffRequested);
 		GodotGlobalEvents.Instance.GitCommitWorkingTreeDiffRequested.Subscribe(OnGitCommitWorkingTreeDiffRequested);
 		GodotGlobalEvents.Instance.GitStashDiffRequested.Subscribe(OnGitStashDiffRequested);
+		GodotGlobalEvents.Instance.GitRefComparisonDiffRequested.Subscribe(OnGitRefComparisonDiffRequested);
+		GodotGlobalEvents.Instance.FileComparisonRequested.Subscribe(OnFileComparisonRequested);
 	}
 
 	public override void _GuiInput(InputEvent @event)
@@ -87,6 +90,8 @@ public partial class CodeEditorPanel : MarginContainer
 			GodotGlobalEvents.Instance.GitCommitDiffRequested.Unsubscribe(OnGitCommitDiffRequested);
 			GodotGlobalEvents.Instance.GitCommitWorkingTreeDiffRequested.Unsubscribe(OnGitCommitWorkingTreeDiffRequested);
 			GodotGlobalEvents.Instance.GitStashDiffRequested.Unsubscribe(OnGitStashDiffRequested);
+			GodotGlobalEvents.Instance.GitRefComparisonDiffRequested.Unsubscribe(OnGitRefComparisonDiffRequested);
+			GodotGlobalEvents.Instance.FileComparisonRequested.Unsubscribe(OnFileComparisonRequested);
 		}
 
 		if (_tabContainer is null || Solution is null || Singletons.AppState is null) return;
@@ -198,6 +203,16 @@ public partial class CodeEditorPanel : MarginContainer
 		await SetGitStashDiff(request);
 	}
 
+	private async Task OnGitRefComparisonDiffRequested(GitRefComparisonFileDiffRequest request)
+	{
+		await SetGitRefComparisonDiff(request);
+	}
+
+	private async Task OnFileComparisonRequested(FileCompareRequest request)
+	{
+		await SetFileComparison(request);
+	}
+
 	public async Task SetSharpIdeFile(SharpIdeFile file, SharpIdeFileLinePosition? fileLinePosition)
 	{
 		await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
@@ -259,7 +274,7 @@ public partial class CodeEditorPanel : MarginContainer
 	{
 		await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
 		var normalizedPath = Path.GetFullPath(absolutePath);
-		var existingTab = await this.InvokeAsync(() => FindGitDiffViewerTab(normalizedPath, StringComparison.OrdinalIgnoreCase));
+		var existingTab = await this.InvokeAsync(() => FindDiffViewerTab(normalizedPath, StringComparison.OrdinalIgnoreCase));
 		if (existingTab is not null)
 		{
 			var existingTabIndex = existingTab.GetIndex();
@@ -268,7 +283,7 @@ public partial class CodeEditorPanel : MarginContainer
 			return;
 		}
 
-		var newTab = _gitDiffViewerScene.Instantiate<GitDiffViewer>();
+		var newTab = _diffViewerScene.Instantiate<DiffViewer>();
 		await this.InvokeAsync(() =>
 		{
 			_tabContainer.AddChild(newTab);
@@ -286,7 +301,7 @@ public partial class CodeEditorPanel : MarginContainer
 	{
 		await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
 		var previewKey = $"{request.CommitSha}:{request.RepoRelativePath}";
-		var existingTab = await this.InvokeAsync(() => FindGitDiffViewerTab(previewKey, StringComparison.Ordinal));
+		var existingTab = await this.InvokeAsync(() => FindDiffViewerTab(previewKey, StringComparison.Ordinal));
 		if (existingTab is not null)
 		{
 			var existingTabIndex = existingTab.GetIndex();
@@ -295,7 +310,7 @@ public partial class CodeEditorPanel : MarginContainer
 			return;
 		}
 
-		var newTab = _gitDiffViewerScene.Instantiate<GitDiffViewer>();
+		var newTab = _diffViewerScene.Instantiate<DiffViewer>();
 		await this.InvokeAsync(() =>
 		{
 			_tabContainer.AddChild(newTab);
@@ -313,7 +328,7 @@ public partial class CodeEditorPanel : MarginContainer
 	{
 		await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
 		var previewKey = $"worktree:{request.CommitSha}:{request.RepoRelativePath}";
-		var existingTab = await this.InvokeAsync(() => FindGitDiffViewerTab(previewKey, StringComparison.Ordinal));
+		var existingTab = await this.InvokeAsync(() => FindDiffViewerTab(previewKey, StringComparison.Ordinal));
 		if (existingTab is not null)
 		{
 			var existingTabIndex = existingTab.GetIndex();
@@ -322,7 +337,7 @@ public partial class CodeEditorPanel : MarginContainer
 			return;
 		}
 
-		var newTab = _gitDiffViewerScene.Instantiate<GitDiffViewer>();
+		var newTab = _diffViewerScene.Instantiate<DiffViewer>();
 		await this.InvokeAsync(() =>
 		{
 			_tabContainer.AddChild(newTab);
@@ -340,7 +355,7 @@ public partial class CodeEditorPanel : MarginContainer
 	{
 		await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
 		var previewKey = $"{request.StashRef}:{request.RepoRelativePath}";
-		var existingTab = await this.InvokeAsync(() => FindGitDiffViewerTab(previewKey, StringComparison.Ordinal));
+		var existingTab = await this.InvokeAsync(() => FindDiffViewerTab(previewKey, StringComparison.Ordinal));
 		if (existingTab is not null)
 		{
 			var existingTabIndex = existingTab.GetIndex();
@@ -349,7 +364,7 @@ public partial class CodeEditorPanel : MarginContainer
 			return;
 		}
 
-		var newTab = _gitDiffViewerScene.Instantiate<GitDiffViewer>();
+		var newTab = _diffViewerScene.Instantiate<DiffViewer>();
 		await this.InvokeAsync(() =>
 		{
 			_tabContainer.AddChild(newTab);
@@ -363,9 +378,74 @@ public partial class CodeEditorPanel : MarginContainer
 		await newTab.LoadHistoricalDiff(request);
 	}
 
-	private GitDiffViewer? FindGitDiffViewerTab(string previewKey, StringComparison comparison)
+	public async Task SetGitRefComparisonDiff(GitRefComparisonFileDiffRequest request)
 	{
-		foreach (var viewer in _tabContainer.GetChildren().OfType<GitDiffViewer>())
+		await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
+		var previewKey = BuildComparisonPreviewKey(request);
+		var existingTab = await this.InvokeAsync(() => FindDiffViewerTab(previewKey, StringComparison.Ordinal));
+		if (existingTab is not null)
+		{
+			var existingTabIndex = existingTab.GetIndex();
+			await this.InvokeAsync(() => _tabContainer.CurrentTab = existingTabIndex);
+			await existingTab.LoadHistoricalDiff(request);
+			return;
+		}
+
+		var newTab = _diffViewerScene.Instantiate<DiffViewer>();
+		await this.InvokeAsync(() =>
+		{
+			_tabContainer.AddChild(newTab);
+			var newTabIndex = _tabContainer.GetTabCount() - 1;
+			_tabContainer.SetTabIcon(newTabIndex, _gitPreviewIcon);
+			_tabContainer.SetTabTitle(newTabIndex, $"Diff: {Path.GetFileName(request.RepoRelativePath)}");
+			_tabContainer.SetTabTooltip(newTabIndex, previewKey);
+			_tabContainer.CurrentTab = newTabIndex;
+		});
+
+		await newTab.LoadHistoricalDiff(request);
+	}
+
+	public async Task SetFileComparison(FileCompareRequest request)
+	{
+		await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
+		var existingTab = await this.InvokeAsync(() => FindDiffViewerTab(request.ComparisonKey, StringComparison.Ordinal));
+		if (existingTab is not null)
+		{
+			var existingTabIndex = existingTab.GetIndex();
+			await this.InvokeAsync(() => _tabContainer.CurrentTab = existingTabIndex);
+			await existingTab.LoadFileComparison(request);
+			return;
+		}
+
+		var newTab = _diffViewerScene.Instantiate<DiffViewer>();
+		await this.InvokeAsync(() =>
+		{
+			_tabContainer.AddChild(newTab);
+			var newTabIndex = _tabContainer.GetTabCount() - 1;
+			_tabContainer.SetTabIcon(newTabIndex, _gitPreviewIcon);
+			var tabPath = string.IsNullOrWhiteSpace(request.RightAbsolutePath) ? request.LeftAbsolutePath : request.RightAbsolutePath;
+			_tabContainer.SetTabTitle(newTabIndex, $"Diff: {Path.GetFileName(tabPath)}");
+			_tabContainer.SetTabTooltip(newTabIndex, request.ComparisonKey);
+			_tabContainer.CurrentTab = newTabIndex;
+		});
+
+		await newTab.LoadFileComparison(request);
+	}
+
+	private static string BuildComparisonPreviewKey(GitRefComparisonFileDiffRequest request)
+	{
+		var leftKey = request.LeftTarget.Kind is GitComparisonTargetKind.WorkingTree
+			? "worktree"
+			: request.LeftTarget.RefName ?? request.LeftTarget.DisplayName;
+		var rightKey = request.RightTarget.Kind is GitComparisonTargetKind.WorkingTree
+			? "worktree"
+			: request.RightTarget.RefName ?? request.RightTarget.DisplayName;
+		return $"{leftKey}|{rightKey}|{request.RepoRelativePath}";
+	}
+
+	private DiffViewer? FindDiffViewerTab(string previewKey, StringComparison comparison)
+	{
+		foreach (var viewer in _tabContainer.GetChildren().OfType<DiffViewer>())
 		{
 			if (string.Equals(viewer.PreviewKey, previewKey, comparison))
 			{

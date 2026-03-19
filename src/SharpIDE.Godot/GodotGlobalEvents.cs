@@ -1,4 +1,5 @@
 using SharpIDE.Application.Features.Analysis;
+using SharpIDE.Application.Features.Compare;
 using SharpIDE.Application.Features.Events;
 using SharpIDE.Application.Features.Git;
 using SharpIDE.Application.Features.SolutionDiscovery;
@@ -22,6 +23,11 @@ public class GodotGlobalEvents
     public EventWrapper<GitCommitFileDiffRequest, Task> GitCommitDiffRequested { get; } = new(_ => Task.CompletedTask);
     public EventWrapper<GitCommitWorkingTreeDiffRequest, Task> GitCommitWorkingTreeDiffRequested { get; } = new(_ => Task.CompletedTask);
     public EventWrapper<GitStashFileDiffRequest, Task> GitStashDiffRequested { get; } = new(_ => Task.CompletedTask);
+    public EventWrapper<GitRefComparisonRequest, Task> GitRefComparisonRequested { get; } = new(_ => Task.CompletedTask);
+    public EventWrapper<GitRefComparisonFileDiffRequest, Task> GitRefComparisonDiffRequested { get; } = new(_ => Task.CompletedTask);
+    public EventWrapper<FileCompareRequest, Task> FileComparisonRequested { get; } = new(_ => Task.CompletedTask);
+    public EventWrapper<DirectoryCompareRequest, Task> DirectoryComparisonRequested { get; } = new(_ => Task.CompletedTask);
+    public EventWrapper<bool, Task> CompareVisibilityChanged { get; } = new(_ => Task.CompletedTask);
     public EventWrapper<Task> GitStatusesChanged { get; } = new(() => Task.CompletedTask);
     public EventWrapper<LightOrDarkTheme, Task> TextEditorThemeChanged { get; } = new(_ => Task.CompletedTask);
 }

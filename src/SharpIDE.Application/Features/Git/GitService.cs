@@ -615,6 +615,46 @@ public class GitService(IdeOpenTabsFileManager openTabsFileManager)
         EnsureSuccess(result, "Failed to create tag.");
     }
 
+    public async Task<GitRefComparisonResult> GetRefComparison(GitRefComparisonRequest request, CancellationToken cancellationToken = default)
+    {
+        var args = BuildComparisonDiffArguments(request.LeftTarget, request.RightTarget);
+        var result = await ExecuteGitBufferedAsync(request.RepoRootPath, args, cancellationToken);
+        EnsureSuccess(result, "Failed to load git comparison.");
+
+        return new GitRefComparisonResult
+        {
+            Request = request,
+            Files = ParseNameStatusEntries(result.StandardOutput)
+                .Select(static file => new GitRefComparisonFile
+                {
+                    RepoRelativePath = file.RepoRelativePath,
+                    OldRepoRelativePath = file.OldRepoRelativePath,
+                    StatusCode = file.StatusCode,
+                    DisplayPath = file.DisplayPath
+                })
+                .ToList()
+        };
+    }
+
+    public async Task<GitDiffViewModel> GetRefComparisonFileDiffView(GitRefComparisonFileDiffRequest request, CancellationToken cancellationToken = default)
+    {
+        var leftPath = request.OldRepoRelativePath ?? request.RepoRelativePath;
+        var leftTextTask = GetComparisonTargetText(request.RepoRootPath, request.LeftTarget, leftPath, cancellationToken);
+        var rightTextTask = GetComparisonTargetText(request.RepoRootPath, request.RightTarget, request.RepoRelativePath, cancellationToken);
+        await Task.WhenAll(leftTextTask, rightTextTask);
+        var absolutePath = Path.Combine(request.RepoRootPath, request.RepoRelativePath.Replace('/', Path.DirectorySeparatorChar));
+
+        return _patchBuilder.BuildCanonicalViewModel(
+            request.RepoRelativePath,
+            absolutePath,
+            GitDiffMode.Historical,
+            request.LeftTarget.DisplayName,
+            request.RightTarget.DisplayName,
+            await leftTextTask,
+            await rightTextTask,
+            canEditCurrent: false);
+    }
+
     public Task Reset(string repoRoot, string commitSha, ResetMode mode, CancellationToken cancellationToken = default)
     {
         return Task.Run(() =>
@@ -2060,6 +2100,35 @@ public class GitService(IdeOpenTabsFileManager openTabsFileManager)
         return NormalizeNewLines(await File.ReadAllTextAsync(absolutePath, cancellationToken));
     }
 
+    private async Task<string> GetComparisonTargetText(
+        string repoRoot,
+        GitComparisonTarget target,
+        string repoRelativePath,
+        CancellationToken cancellationToken)
+    {
+        var revisionSpec = GetComparisonTargetRevisionSpec(target);
+        if (revisionSpec is not null)
+        {
+            return await GetRevisionFileText(repoRoot, repoRelativePath, $"{revisionSpec}:{repoRelativePath}", cancellationToken);
+        }
+
+        var absolutePath = NormalizePath(Path.Combine(repoRoot, repoRelativePath.Replace('/', Path.DirectorySeparatorChar)));
+        return File.Exists(absolutePath)
+            ? await ReadWorkingTextAsync(absolutePath, cancellationToken)
+            : string.Empty;
+    }
+
+    private static string? GetComparisonTargetRevisionSpec(GitComparisonTarget target)
+    {
+        return target.Kind switch
+        {
+            GitComparisonTargetKind.WorkingTree => null,
+            GitComparisonTargetKind.Ref when !string.IsNullOrWhiteSpace(target.RefName) => target.RefName,
+            GitComparisonTargetKind.Ref => throw new InvalidOperationException("Comparison ref targets must include a ref name."),
+            _ => throw new ArgumentOutOfRangeException(nameof(target), target.Kind, null)
+        };
+    }
+
     private static GitWorkingTreeEntry? GetCurrentWorkingTreeEntry(Repository repo, string absolutePath)
     {
         var repoRelativePath = NormalizeRepositoryRelativePath(Path.GetRelativePath(repo.Info.WorkingDirectory, NormalizePath(absolutePath)));
@@ -2332,6 +2401,40 @@ public class GitService(IdeOpenTabsFileManager openTabsFileManager)
 
         args.Add("--");
         args.AddRange(relativePaths);
+        return args;
+    }
+
+    private static IReadOnlyList<string> BuildComparisonDiffArguments(GitComparisonTarget leftTarget, GitComparisonTarget rightTarget)
+    {
+        var leftRevision = GetComparisonTargetRevisionSpec(leftTarget);
+        var rightRevision = GetComparisonTargetRevisionSpec(rightTarget);
+        if (leftRevision is null && rightRevision is null)
+        {
+            throw new InvalidOperationException("Working tree to working tree comparisons are not supported.");
+        }
+
+        var args = new List<string>
+        {
+            "diff",
+            "--name-status",
+            "--no-color",
+            "--no-ext-diff",
+            "--find-renames"
+        };
+
+        if (leftRevision is null)
+        {
+            args.Add("-R");
+            args.Add(rightRevision!);
+            return args;
+        }
+
+        args.Add(leftRevision);
+        if (rightRevision is not null)
+        {
+            args.Add(rightRevision);
+        }
+
         return args;
     }
 

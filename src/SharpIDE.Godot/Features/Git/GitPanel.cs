@@ -777,10 +777,10 @@ public partial class GitPanel : Control
                 break;
             }
             case RefContextAction.ShowDiffWithWorkingTree:
-                // TODO
+                OpenComparison(node, compareAgainstWorkingTree: true);
                 break;
             case RefContextAction.ShowDiffCurrentBranchWithSelected:
-                //TODO
+                OpenComparison(node, compareAgainstWorkingTree: false);
                 break;
             case RefContextAction.RebaseCurrentOntoSelected:
                 if (await ConfirmAsync("Rebase Branch", $"Rebase current branch onto '{node.ShortName ?? GetShortRefName(node.RefName)}'?"))
@@ -831,6 +831,54 @@ public partial class GitPanel : Control
             default:
                 throw new ArgumentOutOfRangeException(nameof(action), action, null);
         }
+    }
+
+    private void OpenComparison(GitRefNode node, bool compareAgainstWorkingTree)
+    {
+        if (string.IsNullOrWhiteSpace(node.RefName))
+        {
+            return;
+        }
+
+        GitComparisonTarget leftTarget;
+        GitComparisonTarget rightTarget;
+        if (compareAgainstWorkingTree)
+        {
+            leftTarget = new GitComparisonTarget
+            {
+                Kind = GitComparisonTargetKind.Ref,
+                RefName = node.RefName,
+                DisplayName = node.ShortName ?? GetShortRefName(node.RefName)
+            };
+            rightTarget = new GitComparisonTarget
+            {
+                Kind = GitComparisonTargetKind.WorkingTree,
+                RefName = null,
+                DisplayName = "Working tree"
+            };
+        }
+        else
+        {
+            leftTarget = new GitComparisonTarget
+            {
+                Kind = GitComparisonTargetKind.Ref,
+                RefName = _currentBranchRefName,
+                DisplayName = GetShortRefName(_currentBranchRefName)
+            };
+            rightTarget = new GitComparisonTarget
+            {
+                Kind = GitComparisonTargetKind.Ref,
+                RefName = node.RefName,
+                DisplayName = node.ShortName ?? GetShortRefName(node.RefName)
+            };
+        }
+
+        GodotGlobalEvents.Instance.GitRefComparisonRequested.InvokeParallelFireAndForget(new GitRefComparisonRequest
+        {
+            RepoRootPath = _repoRootPath,
+            LeftTarget = leftTarget,
+            RightTarget = rightTarget
+        });
     }
 
     private async Task RunRefActionAsync(Func<Task> action)

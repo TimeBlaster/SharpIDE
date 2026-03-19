@@ -1,12 +1,12 @@
 [gd_scene format=3 uid="uid://5xjlumtkd0fo"]
 
-[ext_resource type="Script" uid="uid://n01wsc11fm5v" path="res://Features/Git/GitDiffViewer.cs" id="1_difv"]
+[ext_resource type="Script" uid="uid://n01wsc11fm5v" path="res://Features/Compare/DiffViewer.cs" id="1_difv"]
 [ext_resource type="FontVariation" uid="uid://cctwlwcoycek7" path="res://Features/CodeEditor/Resources/CascadiaFontVariation.tres" id="2_font"]
 [ext_resource type="Script" uid="uid://sff3kheoknoq" path="res://Features/Git/GitDiffActionGutter.cs" id="2_guttr"]
 [ext_resource type="Script" uid="uid://jjqpi6h0t6uo" path="res://Features/Git/GitDiffConnectorOverlay.cs" id="5_conn"]
 [ext_resource type="Script" uid="uid://7x2ptpbexyw0" path="res://Features/CodeEditor/GitChangeScrollbarOverlay.cs" id="6_scrlm"]
 
-[node name="GitDiffViewer" type="MarginContainer" unique_id=278865676]
+[node name="DiffViewer" type="MarginContainer" unique_id=278865676]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
