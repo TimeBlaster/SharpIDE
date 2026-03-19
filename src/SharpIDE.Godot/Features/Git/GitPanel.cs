@@ -1170,12 +1170,12 @@ public partial class GitPanel : Control
         menu.AddItem("Checkout Revision", (int)HistoryContextAction.CheckoutRevision);
         menu.SetItemDisabled(menu.ItemCount - 1, !isSingle);
         menu.AddItem("Compare with Working Tree", (int)HistoryContextAction.CompareWithWorkingTree);
-        menu.SetItemDisabled(menu.ItemCount - 1, true); // TODO: requires a dedicated compare surface.
+        menu.SetItemDisabled(menu.ItemCount - 1, !isSingle);
         menu.AddSeparator();
 
         var resetSubmenu = new PopupMenu();
         menu.AddSubmenuNodeItem("Reset Current Branch to Here", resetSubmenu, (int)HistoryContextAction.ResetCurrentBranchToHere);
-        var canReset = isSingle;
+        var canReset = isSingle && !_isDetachedHead && !string.IsNullOrWhiteSpace(_currentBranchRefName);
         menu.SetItemDisabled(menu.ItemCount - 1, !canReset);
         resetSubmenu.AddItem("Soft", (int)HistoryResetContextAction.Soft);
         resetSubmenu.SetItemDisabled(resetSubmenu.ItemCount - 1, !canReset);
@@ -1444,9 +1444,29 @@ public partial class GitPanel : Control
                 await RunPanelGitActionAsync(() => _gitService.CheckoutCommit(_repoRootPath, singleRow.Sha));
                 break;
             case HistoryContextAction.CompareWithWorkingTree:
+                if (selectedRows.Count is not 1)
+                {
+                    return;
+                }
+
+                OpenCommitComparison(singleRow);
                 break;
             case HistoryContextAction.ResetCurrentBranchToHere:
+            {
+                if (selectedRows.Count is not 1)
+                {
+                    return;
+                }
+
+                var resetMode = await PromptForResetModeAsync();
+                if (resetMode is null)
+                {
+                    return;
+                }
+
+                await RunHistoryResetAsync(singleRow, resetMode.Value);
                 break;
+            }
             case HistoryContextAction.RevertCommit:
                 if (!await ConfirmAsync("Revert Commit", BuildCommitSelectionMessage("Revert", selectedRows)))
                 {
@@ -1534,13 +1554,48 @@ public partial class GitPanel : Control
 
     private async Task HandleHistoryResetContextActionAsync(GitHistoryRow row, HistoryResetContextAction action)
     {
-        var mode = action switch
+        await RunHistoryResetAsync(row, GetResetMode(action));
+    }
+
+    private void OpenCommitComparison(GitHistoryRow row)
+    {
+        GodotGlobalEvents.Instance.GitRefComparisonRequested.InvokeParallelFireAndForget(new GitRefComparisonRequest
+        {
+            RepoRootPath = _repoRootPath,
+            LeftTarget = new GitComparisonTarget
+            {
+                Kind = GitComparisonTargetKind.Ref,
+                RefName = row.Sha,
+                DisplayName = row.ShortSha
+            },
+            RightTarget = new GitComparisonTarget
+            {
+                Kind = GitComparisonTargetKind.WorkingTree,
+                RefName = null,
+                DisplayName = "Working tree"
+            }
+        });
+    }
+
+    private static ResetMode GetResetMode(HistoryResetContextAction action)
+    {
+        return action switch
         {
             HistoryResetContextAction.Soft => ResetMode.Soft,
             HistoryResetContextAction.Mixed => ResetMode.Mixed,
             HistoryResetContextAction.Hard => ResetMode.Hard,
             _ => throw new ArgumentOutOfRangeException(nameof(action), action, null)
         };
+    }
+
+    private async Task RunHistoryResetAsync(GitHistoryRow row, ResetMode mode)
+    {
+        if (_isDetachedHead || string.IsNullOrWhiteSpace(_currentBranchRefName))
+        {
+            await ShowErrorDialogAsync("Reset Branch", "Cannot reset the current branch while HEAD is detached.");
+            return;
+        }
+
         var confirmationMessage = mode is ResetMode.Hard
             ? $"Hard reset the current branch to '{row.ShortSha}'? This will discard working tree and index changes."
             : $"Reset the current branch to '{row.ShortSha}' using {mode.ToString().ToLowerInvariant()} mode?";
@@ -1550,6 +1605,28 @@ public partial class GitPanel : Control
         }
 
         await RunPanelGitActionAsync(() => _gitService.Reset(_repoRootPath, row.Sha, mode));
+    }
+
+    private async Task<ResetMode?> PromptForResetModeAsync()
+    {
+        var menu = new PopupMenu();
+        var tcs = new TaskCompletionSource<ResetMode?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await this.InvokeAsync(() =>
+        {
+            AddChild(menu);
+            menu.AddItem("Soft", (int)HistoryResetContextAction.Soft);
+            menu.AddItem("Mixed", (int)HistoryResetContextAction.Mixed);
+            menu.AddItem("Hard", (int)HistoryResetContextAction.Hard);
+            menu.IdPressed += id => tcs.TrySetResult(GetResetMode((HistoryResetContextAction)id));
+            menu.PopupHide += () =>
+            {
+                tcs.TrySetResult(null);
+                menu.QueueFree();
+            };
+            PopupMenuAtMouse(menu);
+        });
+
+        return await tcs.Task;
     }
 
     private async Task HandleFilesContextActionAsync(IReadOnlyList<GitCommitTreeFileNode> selectedFiles, FilesContextAction action)

@@ -11,7 +11,7 @@ public partial class SolutionExplorerPanel
     private IReadOnlyList<SharpIdeFile> GetSelectedFileContextItems(IReadOnlyList<TreeItem> selectedItems)
     {
         return selectedItems
-            .Select(item => item.GetTypedMetadata<SharpIdeFile>(0))
+            .Select(item => item.SharpIdeNode as SharpIdeFile)
             .Where(item => item != null)
             .DistinctBy(item => item.Path)
             .ToArray();
@@ -20,7 +20,7 @@ public partial class SolutionExplorerPanel
     private IReadOnlyList<SharpIdeFolder> GetSelectedFolderContextItems(IReadOnlyList<TreeItem> selectedItems)
     {
         return selectedItems
-            .Select(item => item.GetTypedMetadata<SharpIdeFolder>(0))
+            .Select(item => item.SharpIdeNode as SharpIdeFolder)
             .Where(item => item != null)
             .DistinctBy(item => item.Path)
             .ToArray();
